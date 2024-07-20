@@ -1,0 +1,82 @@
+[
+	{
+		"name": "John Doe",
+		"age": 28,
+		"education": "Bachelor's in Computer Science",
+		"skills": "Python, Java, Machine Learning",
+		"experience": "5 years as Software Engineer",
+		"value": 85000
+	},
+	{
+		"name": "Jane Smith",
+		"age": 35,
+		"education": "Master's in Business Administration",
+		"skills": "Leadership, Marketing, Project Management",
+		"experience": "10 years in Marketing",
+		"value": 120000
+	},
+	{
+		"name": "Mike Johnson",
+		"age": 42,
+		"education": "Ph.D. in Data Science",
+		"skills": "Big Data, AI, Statistics",
+		"experience": "15 years in Data Analysis",
+		"value": 150000
+	},
+	{
+		"name": "Emily Brown",
+		"age": 31,
+		"education": "Bachelor's in Graphic Design",
+		"skills": "UI/UX, Adobe Creative Suite, Web Design",
+		"experience": "7 years as UI/UX Designer",
+		"value": 95000
+	},
+	{
+		"name": "David Lee",
+		"age": 26,
+		"education": "Associate's in Network Administration",
+		"skills": "Network Security, Cloud Computing, Linux",
+		"experience": "3 years as Network Administrator",
+		"value": 70000
+	},
+	{
+		"name": "Sarah Wilson",
+		"age": 38,
+		"education": "Master's in Human Resources",
+		"skills": "Recruitment, Employee Relations, Training",
+		"experience": "12 years in HR Management",
+		"value": 110000
+	},
+	{
+		"name": "Tom Garcia",
+		"age": 29,
+		"education": "Bachelor's in Finance",
+		"skills": "Financial Analysis, Investment Strategies, Excel",
+		"experience": "6 years as Financial Analyst",
+		"value": 90000
+	},
+	{
+		"name": "Lisa Chen",
+		"age": 33,
+		"education": "Master's in Electrical Engineering",
+		"skills": "Circuit Design, IoT, Embedded Systems",
+		"experience": "8 years as Electrical Engineer",
+		"value": 105000
+	},
+	{
+		"name": "Robert Taylor",
+		"age": 45,
+		"education": "Bachelor's in Sales and Marketing",
+		"skills": "B2B Sales, CRM, Negotiation",
+		"experience": "20 years in Sales Management",
+		"value": 130000
+	},
+	{
+		"name": "Amanda Martinez",
+		"age": 27,
+		"education": "Bachelor's in Psychology",
+		"skills": "Counseling, Research, Data Analysis",
+		"experience": "4 years as Research Assistant",
+		"value": 65000
+	}
+]
