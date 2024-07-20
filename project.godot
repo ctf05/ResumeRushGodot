@@ -15,10 +15,6 @@ run/main_scene="res://main.tscn"
 config/features=PackedStringArray("4.2", "Forward Plus")
 config/icon="res://icon.svg"
 
-[autoload]
-
-Main="*res://main.gd"
-
 [dotnet]
 
 project/assembly_name="ResumeRush"

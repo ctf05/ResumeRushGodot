@@ -5,6 +5,6 @@
 [node name="Main" type="Node2D"]
 script = ExtResource("1_ewq6u")
 
-[node name="SFXPlayer" type="AudioStreamPlayer" parent="."]
-
 [node name="BackgroundMusic" type="AudioStreamPlayer" parent="."]
+
+[node name="SFXPlayer" type="AudioStreamPlayer" parent="."]
