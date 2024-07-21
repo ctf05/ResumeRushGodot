@@ -6,6 +6,7 @@ var add_ai_button
 var remove_ai_button
 var game_settings_label
 var not_enough_players_dialog
+var lobby_code_label: Label
 signal start_game
 signal add_ai_player
 signal remove_ai_player
@@ -57,6 +58,10 @@ func _create_ui():
 	var vbox = VBoxContainer.new()
 	vbox.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(vbox)
+	
+	lobby_code_label = Label.new()
+	lobby_code_label.text = "Lobby Code: " + get_parent().lobby_code
+	vbox.add_child(lobby_code_label)
 
 	game_settings_label = Label.new()
 	game_settings_label.text = "Game Settings"

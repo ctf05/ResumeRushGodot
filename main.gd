@@ -19,6 +19,7 @@ var game_instance: Node2D
 var round_duration = DEFAULT_ROUND_DURATION
 var ceo_starting_budget = DEFAULT_CEO_STARTING_BUDGET
 var total_rounds = 3
+var lobby_code = ""
 var ai_players = []
 
 @onready var background_music: AudioStreamPlayer = $BackgroundMusic
@@ -43,6 +44,12 @@ func _ready():
 	_initialize_main_menu()
 	_load_resumes()
 	_load_audio()
+	
+func create_server():
+	peer.create_server(4242, MAX_PLAYERS)
+	multiplayer.multiplayer_peer = peer
+	lobby_code = generate_lobby_code()
+	print("Server created with lobby code: ", lobby_code)
 
 @rpc("any_peer", "call_local")
 func _start_game_rpc():
@@ -113,10 +120,18 @@ func _on_host_pressed():
 	play_sound("button_click")
 	create_server()
 	_show_lobby()
+	_show_lobby_code()
+
+func _show_lobby_code():
+	var dialog = AcceptDialog.new()
+	dialog.title = "Lobby Code"
+	dialog.dialog_text = "Your lobby code is: " + lobby_code
+	add_child(dialog)
+	dialog.popup_centered()
 
 func _on_join_pressed():
 	play_sound("button_click")
-	_show_ip_dialog()
+	_show_lobby_code_dialog()
 
 func _on_options_pressed():
 	play_sound("button_click")
@@ -126,18 +141,18 @@ func _on_exit_pressed():
 	play_sound("button_click")
 	get_tree().quit()
 
-func _show_ip_dialog():
+func _show_lobby_code_dialog():
 	var dialog = AcceptDialog.new()
 	dialog.title = "Join Game"
 	
-	var ip_input = LineEdit.new()
-	ip_input.placeholder_text = "Enter IP Address"
-	dialog.add_child(ip_input)
+	var code_input = LineEdit.new()
+	code_input.placeholder_text = "Enter Lobby Code"
+	dialog.add_child(code_input)
 	
 	dialog.add_button("Join", true, "join")
 	dialog.connect("custom_action", func(action):
 		if action == "join":
-			join_server(ip_input.text)
+			join_lobby(code_input.text)
 			_show_lobby()
 		dialog.queue_free()
 	)
@@ -234,6 +249,15 @@ func _assign_roles():
 		if role == Role.CANDIDATE:
 			players[player_ids[i]]["resume"] = _assign_resume()
 	rpc("_update_player_list", players)
+
+func _initialize_game():
+	if has_node("Lobby"):
+		get_node("Lobby").queue_free()
+	
+	game_instance = preload("res://game.tscn").instantiate()
+	game_instance.initialize(players, round_duration, ceo_starting_budget, total_rounds, custom_theme, resumes, ai_players)
+	game_instance.connect("game_ended", Callable(self, "_on_game_ended"))
+	add_child(game_instance)
 
 func _on_game_ended():
 	game_instance.queue_free()
@@ -353,15 +377,13 @@ func _on_return_to_menu_pressed():
 	play_sound("button_click")
 	get_tree().reload_current_scene()
 
-func create_server():
-	peer.create_server(4242, MAX_PLAYERS)
+func join_lobby(code):
+	# Here we would typically make a request to a matchmaking server
+	# to get the IP address associated with the lobby code.
+	# For this example, we'll assume all games are on the same machine.
+	peer.create_client("127.0.0.1", 4242)
 	multiplayer.multiplayer_peer = peer
-	print("Server created")
-
-func join_server(ip):
-	peer.create_client(ip, 4242)
-	multiplayer.multiplayer_peer = peer
-	print("Joined server")
+	print("Joined lobby with code: ", code)
 
 func _load_resumes():
 	var file = FileAccess.open("res://data/resumes.json", FileAccess.READ)
@@ -482,17 +504,6 @@ func _remove_ai_player():
 		if has_node("Lobby"):
 			get_node("Lobby").update_player_list(players)
 
-# Update the _initialize_game function to pass AI players to the game instance
-func _initialize_game():
-	if has_node("Lobby"):
-		get_node("Lobby").queue_free()
-	
-	game_instance = preload("res://game.tscn").instantiate()
-	game_instance.initialize(players, round_duration, ceo_starting_budget, total_rounds, custom_theme, resumes, ai_players)
-	game_instance.connect("game_ended", Callable(self, "_on_game_ended"))
-	add_child(game_instance)
-
-# Update the _show_lobby function to connect AI player management
 func _show_lobby():
 	main_menu.hide()
 	var lobby = preload("res://lobby.tscn").instantiate()
@@ -500,3 +511,10 @@ func _show_lobby():
 	lobby.connect("add_ai_player", Callable(self, "_add_ai_player"))
 	lobby.connect("remove_ai_player", Callable(self, "_remove_ai_player"))
 	add_child(lobby)
+	
+func generate_lobby_code():
+	const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	var code = ""
+	for i in range(6):
+		code += characters[randi() % characters.length()]
+	return code

@@ -11,6 +11,7 @@ var round_timer = 0
 var game_state = GameState.PLAYING
 var resumes = []
 var offers = {}
+var accepted_offers = []
 
 var game_ui: Control
 var chat_box: RichTextLabel
@@ -32,9 +33,17 @@ var offer_input: LineEdit
 var candidate_list: ItemList
 var offer_list: ItemList
 
+# AI and Chat variables
+var AI_ACTION_INTERVAL = 5  # AI performs an action every 5 seconds
+var ai_timer = 0
+var chat_history = {}
+var current_chat_partner = "Everyone"
+var chat_partner_dropdown: OptionButton
+
 func _ready():
 	_initialize_game_ui()
 	_start_round()
+	_initialize_chat_history()
 
 func initialize(p_players, p_round_duration, p_ceo_starting_budget, p_total_rounds, p_custom_theme, p_resumes, p_ai_players):
 	players = p_players
@@ -146,11 +155,20 @@ func _initialize_candidate_ui(parent):
 
 func _initialize_chat_system(parent):
 	var chat_container = VBoxContainer.new()
-	chat_container.set_custom_minimum_size(Vector2(0, 150))
+	chat_container.set_custom_minimum_size(Vector2(0, 200))
 	parent.add_child(chat_container)
+	
+	chat_partner_dropdown = OptionButton.new()
+	chat_partner_dropdown.add_item("Everyone")
+	for player_id in players:
+		if player_id != multiplayer.get_unique_id():
+			chat_partner_dropdown.add_item(players[player_id]["name"])
+	chat_partner_dropdown.connect("item_selected", self._on_chat_partner_changed)
+	chat_container.add_child(chat_partner_dropdown)
 	
 	chat_box = RichTextLabel.new()
 	chat_box.scroll_following = true
+	chat_box.set_custom_minimum_size(Vector2(0, 150))
 	chat_container.add_child(chat_box)
 	
 	var input_container = HBoxContainer.new()
@@ -165,21 +183,172 @@ func _initialize_chat_system(parent):
 	send_button.pressed.connect(self._on_chat_send_pressed)
 	input_container.add_child(send_button)
 
+func _initialize_chat_history():
+	chat_history = {}
+	chat_history["Everyone"] = []
+	for player_id in players:
+		chat_history[players[player_id]["name"]] = []
+
+func _on_chat_partner_changed(index):
+	current_chat_partner = chat_partner_dropdown.get_item_text(index)
+	if current_chat_partner not in chat_history:
+		chat_history[current_chat_partner] = []
+	_update_chat_display()
+
+func _update_chat_display():
+	chat_box.clear()
+	if current_chat_partner in chat_history:
+		for message in chat_history[current_chat_partner]:
+			chat_box.add_text(message + "\n")
+	else:
+		print("Chat history not found for: ", current_chat_partner)
+
 func _on_chat_send_pressed():
 	var message = chat_input.text
 	if message.strip_edges() != "":
-		rpc("_receive_chat_message", players[multiplayer.get_unique_id()]["name"], message)
+		_receive_chat_message(players[multiplayer.get_unique_id()]["name"], message, current_chat_partner)
+		rpc("_receive_chat_message", players[multiplayer.get_unique_id()]["name"], message, current_chat_partner)
 		chat_input.text = ""
 	get_parent().play_sound("button_click")
 
 @rpc("any_peer", "reliable")
-func _receive_chat_message(sender_name, message):
-	chat_box.add_text(sender_name + ": " + message + "\n")
+func _receive_chat_message(sender_name, message, recipient):
+	var formatted_message = sender_name + ": " + message
+	
+	# Ensure chat histories exist for sender and recipient
+	if sender_name not in chat_history:
+		chat_history[sender_name] = []
+	if recipient not in chat_history and recipient != "Everyone":
+		chat_history[recipient] = []
+	
+	if recipient == "Everyone":
+		chat_history["Everyone"].append(formatted_message)
+		_update_chat_display()
+	else:
+		chat_history[sender_name].append(formatted_message)
+		chat_history[recipient].append(formatted_message)
+		if current_chat_partner == sender_name or current_chat_partner == recipient:
+			_update_chat_display()
+	
+	# Show notification and update local player's chat history
+	if recipient == players[multiplayer.get_unique_id()]["name"] or recipient == "Everyone":
+		_show_chat_notification(sender_name)
+		if recipient != "Everyone":
+			chat_history[players[multiplayer.get_unique_id()]["name"]].append(formatted_message)
+
+	print("Chat message received - Sender: ", sender_name, ", Recipient: ", recipient, ", Message: ", message)
+
+func _get_player_id_by_name(player_name):
+	for player_id in players:
+		if players[player_id]["name"] == player_name:
+			return player_id
+	return -1
+
+func _show_chat_notification(sender_name):
+	var notification = Label.new()
+	notification.text = "New message from " + sender_name
+	notification.add_theme_color_override("font_color", Color.RED)
+	game_ui.add_child(notification)
+	
+	var tween = create_tween()
+	tween.tween_property(notification, "modulate:a", 0, 2)
+	tween.tween_callback(notification.queue_free)
+
+func _on_make_offer_pressed():
+	get_parent().play_sound("button_click")
+
+	var amount = int(offer_input.text)
+	print("Offer amount entered: ", amount)
+	
+	var selected_items = candidate_list.get_selected_items()
+	if selected_items.is_empty():
+		_show_error_dialog("Please select a candidate first.")
+		return
+	
+	var candidate_index = selected_items[0]
+	var candidate_id = players.keys()[candidate_index]
+	print("Candidate ID selected: ", candidate_id)
+	
+	if amount <= players[multiplayer.get_unique_id()]["budget"]:
+		offers[candidate_id] = {"ceo_id": multiplayer.get_unique_id(), "amount": amount}
+		players[multiplayer.get_unique_id()]["budget"] -= amount
+		get_parent().play_sound("offer_made")
+		rpc("_update_offers", offers)
+		rpc("_update_player_list", players)
+		
+		# Animate the offer being made
+		var offer_label = Label.new()
+		offer_label.text = "Offer: $" + str(amount)
+		offer_label.position = Vector2(get_viewport().size.x / 2, get_viewport().size.y)
+		add_child(offer_label)
+		_animate_ui_element(offer_label, "position:y", get_viewport().size.y, get_viewport().size.y / 2, 0.5)
+		await get_tree().create_timer(1.0).timeout
+		_animate_ui_element(offer_label, "modulate:a", 1, 0, 0.5)
+		await get_tree().create_timer(0.5).timeout
+		offer_label.queue_free()
+	else:
+		_show_error_dialog("Insufficient funds")
+		
+func _on_accept_offer_pressed():
+	get_parent().play_sound("button_click")
+	
+	var player_id = multiplayer.get_unique_id()
+	if player_id in accepted_offers:
+		_show_error_dialog("You have already accepted an offer this round.")
+		return
+	
+	var selected_items = offer_list.get_selected_items()
+	if selected_items.is_empty():
+		_show_error_dialog("Please select an offer first.")
+		return
+	
+	var offer_index = selected_items[0]
+	var ceo_id = offers.keys()[offer_index]
+	
+	if player_id not in offers or offers[player_id]["ceo_id"] != ceo_id:
+		_show_error_dialog("Invalid offer selected.")
+		return
+	
+	get_parent().play_sound("offer_accepted")
+	_finalize_offer(player_id, ceo_id)
+	
+	# Animate the offer acceptance
+	var acceptance_label = Label.new()
+	acceptance_label.text = "Offer Accepted!"
+	acceptance_label.position = Vector2(get_viewport().size.x / 2, get_viewport().size.y / 2)
+	acceptance_label.modulate.a = 0
+	add_child(acceptance_label)
+	
+	_animate_ui_element(acceptance_label, "modulate:a", 0, 1, 0.5)
+	await get_tree().create_timer(1.0).timeout
+	_animate_ui_element(acceptance_label, "modulate:a", 1, 0, 0.5)
+	await get_tree().create_timer(0.5).timeout
+	acceptance_label.queue_free()
+
+func _process(delta):
+	if game_state == GameState.PLAYING:
+		if round_timer > 0:
+			round_timer -= delta
+			if is_instance_valid(timer_label):
+				timer_label.text = "Time: " + str(int(round_timer))
+			else:
+				print("Timer label is not valid during _process")
+		
+		if round_timer <= 0:
+			print("Round timer reached 0, ending round")
+			_end_round()
+		
+		# AI actions
+		ai_timer += delta
+		if ai_timer >= AI_ACTION_INTERVAL:
+			ai_timer = 0
+			_ai_turn()
 
 func _start_round():
 	print("Starting round ", current_round)
 	round_timer = round_duration
 	offers.clear()
+	accepted_offers.clear()  # Clear accepted offers at the start of each round
 	get_parent().play_sound("round_start")
 	
 	if is_instance_valid(timer_label):
@@ -205,19 +374,6 @@ func _start_round():
 	
 	# AI turns
 	_ai_turn()
-
-func _process(delta):
-	if game_state == GameState.PLAYING:
-		if round_timer > 0:
-			round_timer -= delta
-			if is_instance_valid(timer_label):
-				timer_label.text = "Time: " + str(int(round_timer))
-			else:
-				print("Timer label is not valid during _process")
-		
-		if round_timer <= 0:
-			print("Round timer reached 0, ending round")
-			_end_round()
 
 func _end_round():
 	print("Ending round")
@@ -252,80 +408,100 @@ func _end_game():
 	get_parent().play_sound("game_over")
 	emit_signal("game_ended")
 
-func _on_make_offer_pressed():
-	get_parent().play_sound("button_click")
-
-	var amount = int(offer_input.text)
-	print("Offer amount entered: ", amount)
-	
-	var candidate_index = candidate_list.get_selected_items()[0]
-	var candidate_id = players.keys()[candidate_index]
-	print("Candidate ID selected: ", candidate_id)
-	
-	if amount <= players[multiplayer.get_unique_id()]["budget"]:
-		offers[candidate_id] = {"ceo_id": multiplayer.get_unique_id(), "amount": amount}
-		players[multiplayer.get_unique_id()]["budget"] -= amount
-		get_parent().play_sound("offer_made")
-		rpc("_update_offers", offers)
-		rpc("_update_player_list", players)
+func _ai_turn():
+	for ai_id in ai_players:
+		if players[ai_id]["role"] == Role.CEO:
+			_ai_make_offer(ai_id)
+		elif players[ai_id]["role"] == Role.CANDIDATE:
+			_ai_accept_offer(ai_id)
 		
-		# Animate the offer being made
-		var offer_label = Label.new()
-		offer_label.text = "Offer: $" + str(amount)
-		offer_label.position = Vector2(get_viewport().size.x / 2, get_viewport().size.y)
-		add_child(offer_label)
-		_animate_ui_element(offer_label, "position:y", get_viewport().size.y, get_viewport().size.y / 2, 0.5)
-		await get_tree().create_timer(1.0).timeout
-		_animate_ui_element(offer_label, "modulate:a", 1, 0, 0.5)
-		await get_tree().create_timer(0.5).timeout
-		offer_label.queue_free()
-	else:
-		_show_error_dialog("Insufficient funds")
+		# AI chat
+		if randf() < 0.3:  # 30% chance to send a chat message
+			_ai_send_chat(ai_id)
 
-func _on_accept_offer_pressed():
-	get_parent().play_sound("button_click")
+func _ai_make_offer(ai_id):
+	if players[ai_id]["role"] != Role.CEO:
+		return
 	
-	var offer_index = offer_list.get_selected_items()[0]
-	var ceo_id = offers.keys()[offer_index]
+	for candidate_id in players:
+		if players[candidate_id]["role"] == Role.CANDIDATE and candidate_id not in offers:
+			var candidate_value = players[candidate_id]["resume"]["value"]
+			var offer_amount = int(candidate_value * (0.8 + randf() * 0.4))  # 80% to 120% of true value
+			
+			if offer_amount <= players[ai_id]["budget"]:
+				offers[candidate_id] = {"ceo_id": ai_id, "amount": offer_amount}
+				players[ai_id]["budget"] -= offer_amount
+				rpc("_update_offers", offers)
+				rpc("_update_player_list", players)
+				print("AI CEO ", ai_id, " made an offer of $", offer_amount, " to candidate ", candidate_id)
+				break
+
+func _ai_accept_offer(ai_id):
+	if players[ai_id]["role"] != Role.CANDIDATE:
+		print("AI ", ai_id, " is not a candidate")
+		return
 	
-	get_parent().play_sound("offer_accepted")
-	rpc("_finalize_offer", multiplayer.get_unique_id(), ceo_id)
+	if ai_id in accepted_offers:
+		print("AI Candidate ", ai_id, " has already accepted an offer")
+		return
 	
-	# Animate the offer acceptance
-	var acceptance_label = Label.new()
-	acceptance_label.text = "Offer Accepted!"
-	acceptance_label.position = Vector2(get_viewport().size.x / 2, get_viewport().size.y / 2)
-	acceptance_label.modulate.a = 0
-	add_child(acceptance_label)
+	if ai_id not in offers:
+		print("No offers for AI Candidate ", ai_id)
+		return
 	
-	_animate_ui_element(acceptance_label, "modulate:a", 0, 1, 0.5)
-	await get_tree().create_timer(1.0).timeout
-	_animate_ui_element(acceptance_label, "modulate:a", 1, 0, 0.5)
-	await get_tree().create_timer(0.5).timeout
-	acceptance_label.queue_free()
+	var best_offer = offers[ai_id]
+	print("AI Candidate ", ai_id, " attempting to accept an offer of $", best_offer["amount"], " from CEO ", best_offer["ceo_id"])
+	_finalize_offer(ai_id, best_offer["ceo_id"])
+
+func _ai_send_chat(ai_id):
+	var message = "Hello from AI " + str(ai_id) + "!"
+	var recipient = "Everyone" if randf() < 0.5 else players[players.keys()[randi() % players.size()]]["name"]
+	_receive_chat_message(players[ai_id]["name"], message, recipient)
+	rpc("_receive_chat_message", players[ai_id]["name"], message, recipient)
+	print("AI ", ai_id, " sent a chat message to ", recipient, ": ", message)
 
 @rpc("any_peer", "reliable")
 func _update_offers(new_offers):
 	offers = new_offers
 	_update_offer_ui()
 
-@rpc("any_peer", "reliable")
 func _finalize_offer(candidate_id, ceo_id):
+	print("Attempting to finalize offer for candidate ", candidate_id, " from CEO ", ceo_id)
+	print("Current accepted_offers: ", accepted_offers)
+	
+	if candidate_id in accepted_offers:
+		print("Offer already accepted for candidate ", candidate_id)
+		return
+	
+	if candidate_id not in offers or offers[candidate_id]["ceo_id"] != ceo_id:
+		print("Invalid offer for candidate ", candidate_id)
+		return
+	
 	var offer = offers[candidate_id]
 	players[ceo_id]["budget"] -= offer["amount"]
 	players[candidate_id]["final_offer"] = offer["amount"]
 	players[candidate_id]["hired_by"] = players[ceo_id]["name"]
 	players[ceo_id]["hires"] = players[ceo_id].get("hires", 0) + 1
+	accepted_offers.append(candidate_id)  # Add candidate ID to the accepted_offers array
+	offers.erase(candidate_id)  # Remove the offer after it's accepted
 	_update_offer_ui()
-	rpc("_update_player_list", players)
+	_update_player_list(players)
+	print("Offer finalized for candidate ", candidate_id, " from CEO ", ceo_id)
+	print("Updated accepted_offers: ", accepted_offers)
 
 func _update_offer_ui():
 	if players[multiplayer.get_unique_id()]["role"] == Role.CANDIDATE:
 		offer_list.clear()
-		for ceo_id in offers:
-			if offers[ceo_id]["ceo_id"] != multiplayer.get_unique_id():
-				offer_list.add_item("Offer from " + players[offers[ceo_id]["ceo_id"]]["name"] + ": $" + str(offers[ceo_id]["amount"]))
-
+		var player_id = multiplayer.get_unique_id()
+		if player_id in offers and player_id not in accepted_offers:
+			offer_list.add_item("Offer from " + players[offers[player_id]["ceo_id"]]["name"] + ": $" + str(offers[player_id]["amount"]))
+		elif player_id in accepted_offers:
+			offer_list.add_item("You have accepted an offer this round.")
+	elif players[multiplayer.get_unique_id()]["role"] == Role.CEO:
+		# Update CEO UI to show which offers have been accepted
+		# This part depends on how you've structured your CEO UI
+		pass
+		
 func _show_error_dialog(message):
 	var dialog = AcceptDialog.new()
 	dialog.dialog_text = message
@@ -378,44 +554,6 @@ func _animate_ui_element(element: Control, property: String, start_value, end_va
 	tween.set_parallel(true)
 	element.set(property, start_value)
 	tween.tween_property(element, property, end_value, duration).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
-
-func _ai_make_offer(ai_id):
-	if players[ai_id]["role"] != Role.CEO:
-		return
-	
-	for candidate_id in players:
-		if players[candidate_id]["role"] == Role.CANDIDATE and candidate_id not in offers:
-			var candidate_value = players[candidate_id]["resume"]["value"]
-			var offer_amount = int(candidate_value * (0.8 + randf() * 0.4))  # 80% to 120% of true value
-			
-			if offer_amount <= players[ai_id]["budget"]:
-				offers[candidate_id] = {"ceo_id": ai_id, "amount": offer_amount}
-				players[ai_id]["budget"] -= offer_amount
-				rpc("_update_offers", offers)
-				rpc("_update_player_list", players)
-				break
-
-func _ai_accept_offer(ai_id):
-	if players[ai_id]["role"] != Role.CANDIDATE:
-		return
-	
-	var best_offer = null
-	var best_offer_amount = 0
-	
-	for candidate_id in offers:
-		if offers[candidate_id]["ceo_id"] != ai_id and offers[candidate_id]["amount"] > best_offer_amount:
-			best_offer = candidate_id
-			best_offer_amount = offers[candidate_id]["amount"]
-	
-	if best_offer:
-		rpc("_finalize_offer", ai_id, offers[best_offer]["ceo_id"])
-
-func _ai_turn():
-	for ai_id in ai_players:
-		if players[ai_id]["role"] == Role.CEO:
-			_ai_make_offer(ai_id)
-		elif players[ai_id]["role"] == Role.CANDIDATE:
-			_ai_accept_offer(ai_id)
 
 @rpc("any_peer", "reliable")
 func _update_player_list(new_players):
