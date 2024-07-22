@@ -2,25 +2,31 @@ extends Node2D
 
 const MIN_PLAYERS = 4
 const MAX_PLAYERS = 8
+const DEFAULT_PORT = 4242
 const DEFAULT_ROUND_DURATION = 300  # 5 minutes in seconds
 const DEFAULT_CEO_STARTING_BUDGET = 1000000
+const STUN_SERVER = "stun.l.google.com"
+const STUN_PORT = 19302
+const IP_CHECK_INTERVAL = 60  # Check IP every 60 seconds
+const IP_CHECK_URL = "https://api.ipify.org"
 
 enum Role { CEO, CANDIDATE }
 enum GameState { LOBBY, PLAYING, ENDED }
 
 var players = {}
 var resumes = []
-
 var peer = ENetMultiplayerPeer.new()
-
 var main_menu: Control
 var game_instance: Node2D
-
 var round_duration = DEFAULT_ROUND_DURATION
 var ceo_starting_budget = DEFAULT_CEO_STARTING_BUDGET
 var total_rounds = 3
-var lobby_code = ""
+var external_ip = ""
 var ai_players = []
+var is_host = false
+var connected_peers = []
+var ip_check_timer = Timer.new()
+var http_request = HTTPRequest.new()
 
 @onready var background_music: AudioStreamPlayer = $BackgroundMusic
 @onready var sfx_player: AudioStreamPlayer = $SFXPlayer
@@ -40,16 +46,83 @@ func _ready():
 	multiplayer.peer_connected.connect(self._player_connected)
 	multiplayer.peer_disconnected.connect(self._player_disconnected)
 	
+	ip_check_timer.connect("timeout", self._check_ip)
+	add_child(ip_check_timer)
+	
+	add_child(http_request)
+	http_request.connect("request_completed", self._on_ip_request_completed)
+	get_public_ip()
+	
 	_load_theme()
 	_initialize_main_menu()
 	_load_resumes()
 	_load_audio()
-	
+
 func create_server():
-	peer.create_server(4242, MAX_PLAYERS)
+	is_host = true
+	peer.create_server(DEFAULT_PORT, MAX_PLAYERS)
 	multiplayer.multiplayer_peer = peer
-	lobby_code = generate_lobby_code()
-	print("Server created with lobby code: ", lobby_code)
+	await get_public_ip()
+	print("Server created. Your IP address (lobby code) is: ", external_ip)
+	ip_check_timer.start(IP_CHECK_INTERVAL)
+
+func get_public_ip():
+	http_request.request(IP_CHECK_URL)
+	
+func _on_ip_request_completed(result, response_code, headers, body):
+	if result == HTTPRequest.RESULT_SUCCESS:
+		var new_ip = body.get_string_from_utf8()
+		if new_ip != external_ip:
+			external_ip = new_ip
+			if is_host:
+				_notify_peers_of_ip_change()
+		print("Public IP: ", external_ip)
+	else:
+		print("Failed to get public IP")
+
+func _check_ip():
+	if is_host:
+		get_public_ip()
+		
+func _update_lobby_ip():
+	if has_node("Lobby"):
+		get_node("Lobby").update_ip_label(external_ip)
+
+func _notify_peers_of_ip_change():
+	for peer in connected_peers:
+		rpc_id(peer, "_update_host_ip", external_ip)
+
+@rpc("any_peer", "reliable")
+func _update_host_ip(new_ip):
+	external_ip = new_ip
+	print("Host IP updated to: ", external_ip)
+	_update_lobby_ip()
+	
+func join_lobby(ip):
+	peer.create_client(ip, DEFAULT_PORT)
+	multiplayer.multiplayer_peer = peer
+	print("Joining lobby at IP: ", ip)
+	
+func _show_lobby():
+	main_menu.hide()
+	var lobby = preload("res://lobby.tscn").instantiate()
+	lobby.connect("start_game", Callable(self, "_on_lobby_start_game"))
+	lobby.connect("add_ai_player", Callable(self, "_add_ai_player"))
+	lobby.connect("remove_ai_player", Callable(self, "_remove_ai_player"))
+	add_child(lobby)
+	_update_lobby_ip()  # Update IP label when lobby is shown
+		
+func _player_connected(id):
+	print("Player connected: ", id)
+	players[id] = {"role": null, "score": 0, "budget": ceo_starting_budget, "name": "Player " + str(id)}
+	connected_peers.append(id)
+	rpc("_update_player_list", players)
+
+func _player_disconnected(id):
+	print("Player disconnected: ", id)
+	players.erase(id)
+	connected_peers.erase(id)
+	rpc("_update_player_list", players)
 
 @rpc("any_peer", "call_local")
 func _start_game_rpc():
@@ -120,18 +193,18 @@ func _on_host_pressed():
 	play_sound("button_click")
 	create_server()
 	_show_lobby()
-	_show_lobby_code()
+	_show_host_ip()
 
-func _show_lobby_code():
+func _show_host_ip():
 	var dialog = AcceptDialog.new()
-	dialog.title = "Lobby Code"
-	dialog.dialog_text = "Your lobby code is: " + lobby_code
+	dialog.title = "Your IP Address"
+	dialog.dialog_text = "Your IP address (give this to other players): " + external_ip
 	add_child(dialog)
 	dialog.popup_centered()
 
 func _on_join_pressed():
 	play_sound("button_click")
-	_show_lobby_code_dialog()
+	_show_join_dialog()
 
 func _on_options_pressed():
 	play_sound("button_click")
@@ -141,18 +214,18 @@ func _on_exit_pressed():
 	play_sound("button_click")
 	get_tree().quit()
 
-func _show_lobby_code_dialog():
+func _show_join_dialog():
 	var dialog = AcceptDialog.new()
 	dialog.title = "Join Game"
 	
-	var code_input = LineEdit.new()
-	code_input.placeholder_text = "Enter Lobby Code"
-	dialog.add_child(code_input)
+	var ip_input = LineEdit.new()
+	ip_input.placeholder_text = "Enter Host IP"
+	dialog.add_child(ip_input)
 	
 	dialog.add_button("Join", true, "join")
 	dialog.connect("custom_action", func(action):
 		if action == "join":
-			join_lobby(code_input.text)
+			join_lobby(ip_input.text)
 			_show_lobby()
 		dialog.queue_free()
 	)
@@ -214,16 +287,6 @@ func _show_options_menu():
 	
 	if main_menu:
 		main_menu.hide()
-
-func _player_connected(id):
-	print("Player connected: ", id)
-	players[id] = {"role": null, "score": 0, "budget": ceo_starting_budget, "name": "Player " + str(id)}
-	rpc("_update_player_list", players)
-
-func _player_disconnected(id):
-	print("Player disconnected: ", id)
-	players.erase(id)
-	rpc("_update_player_list", players)
 
 @rpc("any_peer", "reliable")
 func _update_player_list(new_players):
@@ -377,14 +440,6 @@ func _on_return_to_menu_pressed():
 	play_sound("button_click")
 	get_tree().reload_current_scene()
 
-func join_lobby(code):
-	# Here we would typically make a request to a matchmaking server
-	# to get the IP address associated with the lobby code.
-	# For this example, we'll assume all games are on the same machine.
-	peer.create_client("127.0.0.1", 4242)
-	multiplayer.multiplayer_peer = peer
-	print("Joined lobby with code: ", code)
-
 func _load_resumes():
 	var file = FileAccess.open("res://data/resumes.json", FileAccess.READ)
 	var json = JSON.new()
@@ -503,18 +558,3 @@ func _remove_ai_player():
 		rpc("_update_player_list", players)
 		if has_node("Lobby"):
 			get_node("Lobby").update_player_list(players)
-
-func _show_lobby():
-	main_menu.hide()
-	var lobby = preload("res://lobby.tscn").instantiate()
-	lobby.connect("start_game", Callable(self, "_on_lobby_start_game"))
-	lobby.connect("add_ai_player", Callable(self, "_add_ai_player"))
-	lobby.connect("remove_ai_player", Callable(self, "_remove_ai_player"))
-	add_child(lobby)
-	
-func generate_lobby_code():
-	const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	var code = ""
-	for i in range(6):
-		code += characters[randi() % characters.length()]
-	return code

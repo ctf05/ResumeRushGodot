@@ -6,7 +6,7 @@ var add_ai_button
 var remove_ai_button
 var game_settings_label
 var not_enough_players_dialog
-var lobby_code_label: Label
+var ip_info_label: Label
 signal start_game
 signal add_ai_player
 signal remove_ai_player
@@ -22,7 +22,6 @@ func _ready():
 		print("Players: ", players)
 		if players.is_empty():
 			print("Player list is empty")
-			# You might want to add the local player here
 			if get_parent().has_method("add_player"):
 				get_parent().add_player(multiplayer.get_unique_id())
 				players = get_parent().get_players()
@@ -31,7 +30,6 @@ func _ready():
 	else:
 		print("Parent node doesn't have get_players method")
 
-	# Apply custom theme
 	if get_parent() and get_parent().has_method("get_custom_theme"):
 		var custom_theme = get_parent().get_custom_theme()
 		if custom_theme:
@@ -42,7 +40,6 @@ func _ready():
 	else:
 		print("Parent node doesn't have get_custom_theme method")
 
-	# Update game settings display
 	if get_parent() and get_parent().has_method("get_game_settings"):
 		var settings = get_parent().get_game_settings()
 		game_settings_label.text = "Round Duration: %d seconds\nCEO Starting Budget: $%d\nTotal Rounds: %d" % [
@@ -53,15 +50,18 @@ func _ready():
 		print("Game settings updated")
 	else:
 		print("get_game_settings method not found")
+		
+	if get_parent() and get_parent().has_method("get_public_ip"):
+		get_parent().get_public_ip()
 
 func _create_ui():
 	var vbox = VBoxContainer.new()
 	vbox.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(vbox)
 	
-	lobby_code_label = Label.new()
-	lobby_code_label.text = "Lobby Code: " + get_parent().lobby_code
-	vbox.add_child(lobby_code_label)
+	ip_info_label = Label.new()
+	ip_info_label.text = "Your IP (for others to join): " + get_parent().external_ip
+	vbox.add_child(ip_info_label)
 
 	game_settings_label = Label.new()
 	game_settings_label.text = "Game Settings"
@@ -110,7 +110,6 @@ func update_player_list(players):
 	else:
 		print("Cannot update player list: PlayerList node not found")
 
-	# Only show the Start button for the host (first player to join)
 	if start_button:
 		if players.size() > 0 and multiplayer.get_unique_id() == players.keys()[0]:
 			start_button.show()
@@ -120,6 +119,12 @@ func update_player_list(players):
 			print("Start button hidden")
 	else:
 		print("StartButton not found for visibility update")
+
+func update_ip_label(new_ip):
+	if ip_info_label:
+		ip_info_label.text = "Your IP (for others to join): " + new_ip
+	else:
+		print("IP info label not found")
 
 func _on_start_pressed():
 	print("Start button pressed")
