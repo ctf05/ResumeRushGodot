@@ -64,6 +64,18 @@ func _ready():
 	
 func create_server():
 	is_host = true
+	var upnp = UPNP.new()
+	var discover_result = upnp.discover()
+	if discover_result == UPNP.UPNP_RESULT_SUCCESS:
+		if upnp.get_gateway() and upnp.get_gateway().is_valid_gateway():
+			var map_result = upnp.add_port_mapping(DEFAULT_PORT, DEFAULT_PORT, ProjectSettings.get_setting("application/config/name"), "UDP")
+			if map_result == UPNP.UPNP_RESULT_SUCCESS:
+				print("Port forwarded successfully using UPnP")
+			else:
+				print("UPnP port mapping failed")
+	else:
+		print("UPnP discovery failed")
+	
 	var error = peer.create_server(DEFAULT_PORT, MAX_PLAYERS)
 	if error != OK:
 		print("Failed to create server. Error code: ", error)
@@ -82,9 +94,15 @@ func join_lobby(ip):
 		_connection_failed()
 		return
 	multiplayer.multiplayer_peer = peer
+	print("Client peer created, waiting for connection...")
 	
 	# Set a timeout for the connection attempt
-	await get_tree().create_timer(10.0).timeout
+	var timeout = 10  # 10 seconds timeout
+	while is_connecting and timeout > 0:
+		await get_tree().create_timer(1.0).timeout
+		print("Waiting for connection... ", timeout, " seconds left")
+		timeout -= 1
+	
 	if is_connecting:
 		_connection_failed()
 
