@@ -26,6 +26,7 @@ var ai_players = []
 var is_host = false
 var connected_peers = []
 var host_ip = ""
+var is_connecting = false
 var ip_check_timer = Timer.new()
 var http_request = HTTPRequest.new()
 
@@ -47,6 +48,7 @@ func _ready():
 	multiplayer.peer_connected.connect(self._player_connected)
 	multiplayer.peer_disconnected.connect(self._player_disconnected)
 	multiplayer.connected_to_server.connect(self._connected_to_server)
+	multiplayer.connection_failed.connect(self._connection_failed)
 	
 	ip_check_timer.connect("timeout", self._check_ip)
 	add_child(ip_check_timer)
@@ -59,7 +61,7 @@ func _ready():
 	_initialize_main_menu()
 	_load_resumes()
 	_load_audio()
-
+	
 func create_server():
 	is_host = true
 	peer.create_server(DEFAULT_PORT, MAX_PLAYERS)
@@ -68,32 +70,82 @@ func create_server():
 	host_ip = external_ip
 	print("Server created. Your IP address (lobby code) is: ", host_ip)
 	ip_check_timer.start(IP_CHECK_INTERVAL)
+	_show_lobby()
 
 func join_lobby(ip):
 	is_host = false
-	host_ip = ip
+	is_connecting = true
 	peer.create_client(ip, DEFAULT_PORT)
 	multiplayer.multiplayer_peer = peer
-	print("Joining lobby at IP: ", ip)
+	print("Attempting to join lobby at IP: ", ip)
+	
+	# Set a timeout for the connection attempt
+	await get_tree().create_timer(5.0).timeout
+	if is_connecting:
+		_connection_failed()
 
 func _connected_to_server():
 	print("Connected to server")
+	is_connecting = false
 	rpc_id(1, "request_host_ip")
+	_show_lobby()
+
+func _connection_failed():
+	if is_connecting:
+		print("Failed to connect to the server")
+		is_connecting = false
+		_show_error_dialog("Failed to connect to the server. Please check the IP and try again.")
+		# Reset the multiplayer peer
+		multiplayer.multiplayer_peer = null
 
 @rpc("any_peer")
 func request_host_ip():
 	var requester_id = multiplayer.get_remote_sender_id()
-	rpc_id(requester_id, "receive_host_ip", host_ip)
+	rpc_id(requester_id, "receive_host_ip", external_ip)
 
 @rpc("any_peer")
 func receive_host_ip(ip):
 	host_ip = ip
 	_update_lobby_ip()
 
+func _show_lobby():
+	main_menu.hide()
+	var lobby = preload("res://lobby.tscn").instantiate()
+	lobby.connect("start_game", Callable(self, "_on_lobby_start_game"))
+	lobby.connect("add_ai_player", Callable(self, "_add_ai_player"))
+	lobby.connect("remove_ai_player", Callable(self, "_remove_ai_player"))
+	add_child(lobby)
+	_update_lobby_ip()
+
+func _update_lobby_ip():
+	if has_node("Lobby"):
+		get_node("Lobby").update_ip_label(host_ip if not is_host else external_ip)
+
+func _check_ip():
+	if is_host:
+		get_public_ip()
+
+func _on_ip_request_completed(result, response_code, headers, body):
+	if result == HTTPRequest.RESULT_SUCCESS:
+		var new_ip = body.get_string_from_utf8()
+		if new_ip != external_ip:
+			external_ip = new_ip
+			host_ip = external_ip
+			if is_host:
+				_notify_peers_of_ip_change()
+		print("Public IP: ", external_ip)
+		_update_lobby_ip()
+	else:
+		print("Failed to get public IP")
+
+func _notify_peers_of_ip_change():
+	for peer_id in players.keys():
+		if peer_id != multiplayer.get_unique_id():
+			rpc_id(peer_id, "receive_host_ip", host_ip)
+
 func _player_connected(id):
 	print("Player connected: ", id)
 	players[id] = {"role": null, "score": 0, "budget": ceo_starting_budget, "name": "Player " + str(id)}
-	connected_peers.append(id)
 	rpc("_update_player_list", players)
 	if is_host:
 		rpc("show_notification", "Player " + str(id) + " joined the lobby")
@@ -103,46 +155,14 @@ func show_notification(message):
 	if has_node("Lobby"):
 		get_node("Lobby").show_notification(message)
 
-func _update_lobby_ip():
-	if has_node("Lobby"):
-		get_node("Lobby").update_ip_label(host_ip)
-
 func get_public_ip():
 	http_request.request(IP_CHECK_URL)
-	
-func _on_ip_request_completed(result, response_code, headers, body):
-	if result == HTTPRequest.RESULT_SUCCESS:
-		var new_ip = body.get_string_from_utf8()
-		if new_ip != external_ip:
-			external_ip = new_ip
-			if is_host:
-				_notify_peers_of_ip_change()
-		print("Public IP: ", external_ip)
-	else:
-		print("Failed to get public IP")
-
-func _check_ip():
-	if is_host:
-		get_public_ip()
-
-func _notify_peers_of_ip_change():
-	for peer in connected_peers:
-		rpc_id(peer, "_update_host_ip", external_ip)
 
 @rpc("any_peer", "reliable")
 func _update_host_ip(new_ip):
 	external_ip = new_ip
 	print("Host IP updated to: ", external_ip)
 	_update_lobby_ip()
-	
-func _show_lobby():
-	main_menu.hide()
-	var lobby = preload("res://lobby.tscn").instantiate()
-	lobby.connect("start_game", Callable(self, "_on_lobby_start_game"))
-	lobby.connect("add_ai_player", Callable(self, "_add_ai_player"))
-	lobby.connect("remove_ai_player", Callable(self, "_remove_ai_player"))
-	add_child(lobby)
-	_update_lobby_ip()  # Update IP label when lobby is shown
 
 func _player_disconnected(id):
 	print("Player disconnected: ", id)
