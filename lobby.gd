@@ -7,6 +7,7 @@ var remove_ai_button
 var game_settings_label
 var not_enough_players_dialog
 var ip_info_label: Label
+var notification_label: Label
 signal start_game
 signal add_ai_player
 signal remove_ai_player
@@ -84,6 +85,10 @@ func _create_ui():
 	remove_ai_button.text = "Remove AI Player"
 	remove_ai_button.pressed.connect(self._on_remove_ai_pressed)
 	vbox.add_child(remove_ai_button)
+	
+	notification_label = Label.new()
+	notification_label.text = ""
+	vbox.add_child(notification_label)
 
 	not_enough_players_dialog = AcceptDialog.new()
 	not_enough_players_dialog.dialog_text = "Need at least 4 players to start the game."
@@ -122,9 +127,27 @@ func update_player_list(players):
 
 func update_ip_label(new_ip):
 	if ip_info_label:
-		ip_info_label.text = "Your IP (for others to join): " + new_ip
+		if get_parent().is_host:
+			ip_info_label.text = "Your IP (for others to join): " + new_ip
+		else:
+			ip_info_label.text = "Connected to host IP: " + new_ip
 	else:
 		print("IP info label not found")
+
+func show_notification(message):
+	if notification_label:
+		notification_label.text = message
+		# Optional: Create a timer to clear the notification after a few seconds
+		var timer = Timer.new()
+		add_child(timer)
+		timer.connect("timeout", self._clear_notification)
+		timer.set_wait_time(5.0)
+		timer.set_one_shot(true)
+		timer.start()
+
+func _clear_notification():
+	if notification_label:
+		notification_label.text = ""
 
 func _on_start_pressed():
 	print("Start button pressed")
