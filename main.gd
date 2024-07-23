@@ -64,30 +64,33 @@ func _ready():
 	
 func create_server():
 	is_host = true
-	peer.create_server(DEFAULT_PORT, MAX_PLAYERS)
+	var error = peer.create_server(DEFAULT_PORT, MAX_PLAYERS)
+	if error != OK:
+		print("Failed to create server. Error code: ", error)
+		return
 	multiplayer.multiplayer_peer = peer
-	await get_public_ip()
-	host_ip = external_ip
-	print("Server created. Your IP address (lobby code) is: ", host_ip)
-	ip_check_timer.start(IP_CHECK_INTERVAL)
+	print("Server created successfully on port ", DEFAULT_PORT)
 	_show_lobby()
 
 func join_lobby(ip):
 	is_host = false
 	is_connecting = true
-	peer.create_client(ip, DEFAULT_PORT)
+	print("Attempting to connect to ", ip, ":", DEFAULT_PORT)
+	var error = peer.create_client(ip, DEFAULT_PORT)
+	if error != OK:
+		print("Failed to create client. Error code: ", error)
+		_connection_failed()
+		return
 	multiplayer.multiplayer_peer = peer
-	print("Attempting to join lobby at IP: ", ip)
 	
 	# Set a timeout for the connection attempt
-	await get_tree().create_timer(5.0).timeout
+	await get_tree().create_timer(10.0).timeout
 	if is_connecting:
 		_connection_failed()
 
 func _connected_to_server():
-	print("Connected to server")
+	print("Successfully connected to server")
 	is_connecting = false
-	rpc_id(1, "request_host_ip")
 	_show_lobby()
 
 func _connection_failed():
@@ -95,7 +98,6 @@ func _connection_failed():
 		print("Failed to connect to the server")
 		is_connecting = false
 		_show_error_dialog("Failed to connect to the server. Please check the IP and try again.")
-		# Reset the multiplayer peer
 		multiplayer.multiplayer_peer = null
 
 @rpc("any_peer")
