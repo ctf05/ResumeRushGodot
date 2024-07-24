@@ -7,7 +7,7 @@ const DEFAULT_ROUND_DURATION = 300  # 5 minutes in seconds
 const DEFAULT_CEO_STARTING_BUDGET = 1000000
 const STUN_SERVER = "stun.l.google.com"
 const STUN_PORT = 19302
-const IP_CHECK_INTERVAL = 3  # Check IP every 60 seconds
+const IP_CHECK_INTERVAL = 60  # Check IP every 60 seconds
 const IP_CHECK_URL = "https://api.ipify.org"
 
 enum Role { CEO, CANDIDATE }
@@ -22,6 +22,9 @@ var round_duration = DEFAULT_ROUND_DURATION
 var ceo_starting_budget = DEFAULT_CEO_STARTING_BUDGET
 var total_rounds = 3
 var external_ip = ""
+var local_ip = ""
+var global_lobby_code = ""
+var local_lobby_code = ""
 var ai_players = []
 var is_host = false
 var connected_peers = []
@@ -35,15 +38,6 @@ var http_request = HTTPRequest.new()
 
 var custom_theme: Theme
 
-var sound_effects = {
-	"button_click": preload("res://assets/audio/button_click.wav"),
-	"offer_made": preload("res://assets/audio/offer_made.wav"),
-	"offer_accepted": preload("res://assets/audio/offer_accepted.wav"),
-	"round_start": preload("res://assets/audio/round_start.wav"),
-	"round_end": preload("res://assets/audio/round_end.wav"),
-	"game_over": preload("res://assets/audio/game_over.wav")
-}
-
 func _ready():
 	multiplayer.peer_connected.connect(self._player_connected)
 	multiplayer.peer_disconnected.connect(self._player_disconnected)
@@ -55,13 +49,15 @@ func _ready():
 	
 	add_child(http_request)
 	http_request.connect("request_completed", self._on_ip_request_completed)
-	get_public_ip()
 	
 	_load_theme()
 	_initialize_main_menu()
 	_load_resumes()
 	_load_audio()
 	
+	get_public_ip()
+	get_local_ip()
+
 func create_server():
 	is_host = true
 	var upnp = UPNP.new()
@@ -84,9 +80,10 @@ func create_server():
 	print("Server created successfully on port ", DEFAULT_PORT)
 	_show_lobby()
 
-func join_lobby(ip):
+func join_lobby(code):
 	is_host = false
 	is_connecting = true
+	var ip = decompress_ip(code)
 	print("Attempting to connect to ", ip, ":", DEFAULT_PORT)
 	var error = peer.create_client(ip, DEFAULT_PORT)
 	if error != OK:
@@ -139,11 +136,19 @@ func _show_lobby():
 
 func _update_lobby_ip():
 	if has_node("Lobby"):
-		get_node("Lobby").update_ip_label(host_ip if not is_host else external_ip)
+		get_node("Lobby").update_lobby_codes(global_lobby_code, local_lobby_code)
 
 func _check_ip():
 	if is_host:
 		get_public_ip()
+
+func get_public_ip():
+	http_request.request(IP_CHECK_URL)
+
+func get_local_ip():
+	local_ip = IP.get_local_addresses()[0]  # Get the first local IP address
+	local_lobby_code = compress_ip(local_ip)
+	_update_lobby_ip()
 
 func _on_ip_request_completed(result, response_code, headers, body):
 	if result == HTTPRequest.RESULT_SUCCESS:
@@ -151,6 +156,7 @@ func _on_ip_request_completed(result, response_code, headers, body):
 		if new_ip != external_ip:
 			external_ip = new_ip
 			host_ip = external_ip
+			global_lobby_code = compress_ip(external_ip)
 			if is_host:
 				_notify_peers_of_ip_change()
 		print("Public IP: ", external_ip)
@@ -175,9 +181,6 @@ func show_notification(message):
 	if has_node("Lobby"):
 		get_node("Lobby").show_notification(message)
 
-func get_public_ip():
-	http_request.request(IP_CHECK_URL)
-
 @rpc("any_peer", "reliable")
 func _update_host_ip(new_ip):
 	external_ip = new_ip
@@ -196,7 +199,7 @@ func _start_game_rpc():
 	_start_game()
 
 func _load_theme():
-	custom_theme = load("res://theme.tres")
+	custom_theme = load("res://themes/cartoon_office_theme.tres")
 	if custom_theme:
 		get_tree().root.theme = custom_theme
 
@@ -209,15 +212,21 @@ func _load_audio():
 		print("Failed to load background music")
 
 func play_sound(sound_name):
-	if sound_name in sound_effects:
-		sfx_player.stream = sound_effects[sound_name]
-		sfx_player.play()
-	else:
-		print("Sound not found: ", sound_name)
+	SoundManager.play_sound(sound_name)
 
 func _initialize_main_menu():
 	main_menu = Control.new()
 	main_menu.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	
+	var background = AnimatedTexture.new()
+	background.frames = 30  # Adjust based on your GIF
+	for i in range(30):
+		background.set_frame_texture(i, load("res://assets/backgrounds/office_anim_%02d.png" % i))
+	
+	var background_texture = TextureRect.new()
+	background_texture.texture = background
+	background_texture.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	main_menu.add_child(background_texture)
 	
 	var vbox = VBoxContainer.new()
 	vbox.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
@@ -228,32 +237,26 @@ func _initialize_main_menu():
 	title.add_theme_font_size_override("font_size", 32)
 	vbox.add_child(title)
 	
-	var host_button = Button.new()
-	host_button.text = "Host Game"
-	host_button.pressed.connect(self._on_host_pressed)
-	vbox.add_child(host_button)
-	
-	var join_button = Button.new()
-	join_button.text = "Join Game"
-	join_button.pressed.connect(self._on_join_pressed)
-	vbox.add_child(join_button)
-	
-	var options_button = Button.new()
-	options_button.text = "Options"
-	options_button.pressed.connect(self._on_options_pressed)
-	vbox.add_child(options_button)
-	
-	var tutorial_button = Button.new()
-	tutorial_button.text = "How to Play"
-	tutorial_button.pressed.connect(self._show_tutorial)
-	vbox.add_child(tutorial_button)
-	
-	var exit_button = Button.new()
-	exit_button.text = "Exit"
-	exit_button.pressed.connect(self._on_exit_pressed)
-	vbox.add_child(exit_button)
+	var buttons = [
+		{"text": "Host Game", "icon": "nameplate.png", "action": "_on_host_pressed"},
+		{"text": "Join Game", "icon": "id_card.png", "action": "_on_join_pressed"},
+		{"text": "Quick Play", "icon": "quick_play.png", "action": "_on_quick_play_pressed"},
+		{"text": "Settings", "icon": "gear.png", "action": "_on_settings_pressed"}
+	]
+
+	for button_data in buttons:
+		var button = HitboxGenerator.create_texture_button_with_hitbox("res://assets/ui/" + button_data["icon"])
+		button.connect("pressed", Callable(self, button_data["action"]))
+		_animate_button(button)
+		vbox.add_child(button)
 	
 	add_child(main_menu)
+
+func _animate_button(button: TextureButton):
+	button.modulate.a = 0
+	var tween = create_tween()
+	tween.tween_property(button, "modulate:a", 1.0, 0.5).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.play()
 
 func _on_host_pressed():
 	play_sound("button_click")
@@ -272,13 +275,13 @@ func _on_join_pressed():
 	play_sound("button_click")
 	_show_join_dialog()
 
-func _on_options_pressed():
+func _on_settings_pressed():
 	play_sound("button_click")
 	_show_options_menu()
 
-func _on_exit_pressed():
-	play_sound("button_click")
-	get_tree().quit()
+func _on_quick_play_pressed():
+	# Implement quick play functionality
+	pass
 
 func _show_join_dialog():
 	var dialog = AcceptDialog.new()
@@ -390,121 +393,26 @@ func _initialize_game():
 
 func _on_game_ended():
 	game_instance.queue_free()
-	_show_end_game_screen()
+	_show_results_screen()
 
-func _show_end_game_screen():
-	var end_screen = Control.new()
-	end_screen.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	
-	var scroll_container = ScrollContainer.new()
-	scroll_container.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	end_screen.add_child(scroll_container)
-	
-	var vbox = VBoxContainer.new()
-	vbox.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
-	scroll_container.add_child(vbox)
-	
-	var title = Label.new()
-	title.text = "Game Over - Final Results"
-	title.add_theme_font_size_override("font_size", 32)
-	vbox.add_child(title)
-	
-	var ceo_stats = _get_ceo_statistics()
-	var candidate_stats = _get_candidate_statistics()
-	
-	vbox.add_child(_create_statistics_table("CEO Statistics", ceo_stats))
-	vbox.add_child(_create_statistics_table("Candidate Statistics", candidate_stats))
-	
-	var overall_stats = _get_overall_statistics()
-	vbox.add_child(_create_statistics_table("Overall Game Statistics", overall_stats))
-	
-	var return_button = Button.new()
-	return_button.text = "Return to Main Menu"
-	return_button.pressed.connect(self._on_return_to_menu_pressed)
-	vbox.add_child(return_button)
-	
-	add_child(end_screen)
+func _show_results_screen():
+	var results_scene = preload("res://results.tscn").instantiate()
+	results_scene.initialize(players, _get_game_statistics())
+	add_child(results_scene)
 
-func _create_statistics_table(title, stats):
-	var table = VBoxContainer.new()
-	
-	var header = Label.new()
-	header.text = title
-	header.add_theme_font_size_override("font_size", 24)
-	table.add_child(header)
-	
-	var grid = GridContainer.new()
-	grid.columns = 2
-	table.add_child(grid)
-	
-	for key in stats:
-		var key_label = Label.new()
-		key_label.text = key
-		grid.add_child(key_label)
-		
-		var value_label = Label.new()
-		value_label.text = str(stats[key])
-		grid.add_child(value_label)
-	
-	return table
-
-func _get_ceo_statistics():
-	var stats = {}
-	for player_id in players:
-		if players[player_id]["role"] == Role.CEO:
-			stats[players[player_id]["name"]] = {
-				"Score": players[player_id]["score"],
-				"Remaining Budget": players[player_id]["budget"],
-				"Hires Made": players[player_id].get("hires", 0)
-			}
-	return stats
-
-func _get_candidate_statistics():
-	var stats = {}
-	for player_id in players:
-		if players[player_id]["role"] == Role.CANDIDATE:
-			stats[players[player_id]["name"]] = {
-				"Score": players[player_id]["score"],
-				"True Value": players[player_id]["resume"]["value"],
-				"Final Offer": players[player_id].get("final_offer", "N/A"),
-				"Hired By": players[player_id].get("hired_by", "N/A")
-			}
-	return stats
-
-func _get_overall_statistics():
-	var total_offers = 0
-	var total_hires = 0
-	var highest_offer = 0
-	var lowest_offer = INF
-	
-	for player_id in players:
-		if players[player_id]["role"] == Role.CANDIDATE:
-			if players[player_id].get("final_offer", 0) > 0:
-				total_offers += 1
-				total_hires += 1
-				highest_offer = max(highest_offer, players[player_id]["final_offer"])
-				lowest_offer = min(lowest_offer, players[player_id]["final_offer"])
-	
-	var average_offer = "N/A"
-	if total_offers > 0:
-		var total = 0
-		for player_id in players:
-			if players[player_id]["role"] == Role.CANDIDATE and players[player_id].get("final_offer", 0) > 0:
-				total += players[player_id]["final_offer"]
-		average_offer = total / total_offers
-	
-	return {
-		"Total Rounds Played": total_rounds,
-		"Total Offers Made": total_offers,
-		"Total Hires": total_hires,
-		"Highest Offer": highest_offer if highest_offer > 0 else "N/A",
-		"Lowest Offer": lowest_offer if lowest_offer != INF else "N/A",
-		"Average Offer": average_offer
+func _get_game_statistics():
+	var stats = {
+		"Total Rounds": total_rounds,
+		"Total Players": players.size(),
+		"CEOs": len([p for p in players.values() if p["role"] == Role.CEO]),
+		"Candidates": len([p for p in players.values() if p["role"] == Role.CANDIDATE]),
+		"Highest Score": max([p["score"] for p in players.values()]),
+		"Lowest Score": min([p["score"] for p in players.values()]),
+		"Average Score": float(sum([p["score"] for p in players.values()])) / players.size() if players.size() > 0 else 0,
+		"Total Hires": sum([p.get("hires", 0) for p in players.values() if p["role"] == Role.CEO]),
+		"Average Salary": float(sum([p.get("final_offer", 0) for p in players.values() if p["role"] == Role.CANDIDATE])) / len([p for p in players.values() if p["role"] == Role.CANDIDATE]) if len([p for p in players.values() if p["role"] == Role.CANDIDATE]) > 0 else 0
 	}
-
-func _on_return_to_menu_pressed():
-	play_sound("button_click")
-	get_tree().reload_current_scene()
+	return stats
 
 func _load_resumes():
 	var file = FileAccess.open("res://data/resumes.json", FileAccess.READ)
@@ -528,50 +436,7 @@ func _show_error_dialog(message):
 	dialog.popup_centered()
 
 func _show_tutorial():
-	var tutorial = Control.new()
-	tutorial.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	
-	var panel = Panel.new()
-	panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_MINSIZE, 20)
-	tutorial.add_child(panel)
-	
-	var vbox = VBoxContainer.new()
-	vbox.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT, Control.PRESET_MODE_MINSIZE, 20)
-	panel.add_child(vbox)
-	
-	var title = Label.new()
-	title.text = "How to Play ResumeRush"
-	title.add_theme_font_size_override("font_size", 24)
-	vbox.add_child(title)
-	
-	var instructions = RichTextLabel.new()
-	instructions.bbcode_enabled = true
-	instructions.bbcode_text = """
-	[b]Objective:[/b]
-	CEOs aim to hire the best candidates within their budget. Candidates aim to secure the highest paying job.
-
-	[b]Gameplay:[/b]
-	1. Players are randomly assigned roles: CEO or Candidate.
-	2. CEOs review candidate resumes and make offers.
-	3. Candidates can accept one offer per round.
-	4. The game lasts for [color=yellow]%d[/color] rounds.
-
-	[b]Scoring:[/b]
-	- CEOs: Score = Sum(Hired Candidates' True Values) - Sum(Accepted Offer Amounts)
-	- Candidates: Score = Accepted Offer Amount - True Value
-
-	[b]Tips:[/b]
-	- CEOs: Balance offer amounts with candidate potential value.
-	- Candidates: Consider your true value when accepting offers.
-	""" % total_rounds
-	instructions.fit_content = true
-	vbox.add_child(instructions)
-	
-	var close_button = Button.new()
-	close_button.text = "Close Tutorial"
-	close_button.pressed.connect(func(): tutorial.queue_free())
-	vbox.add_child(close_button)
-	
+	var tutorial = preload("res://tutorial_overlay.tscn").instantiate()
 	add_child(tutorial)
 
 func get_players():
@@ -590,37 +455,64 @@ func get_game_settings():
 		"total_rounds": total_rounds
 	}
 
-func add_player(id):
+func add_player(id, is_ai = false):
 	if id not in players:
-		players[id] = {"role": null, "score": 0, "budget": ceo_starting_budget, "name": "Player " + str(id)}
+		players[id] = {
+			"role": null, 
+			"score": 0, 
+			"budget": ceo_starting_budget, 
+			"name": "AI Player " + str(id) if is_ai else "Player " + str(id),
+			"is_ai": is_ai
+		}
 		print("Player added: ", players[id])
 	else:
 		print("Player already exists: ", players[id])
+	rpc("_update_player_list", players)
+
+func remove_player(id):
+	if id in players:
+		players.erase(id)
+		print("Player removed: ", id)
+		rpc("_update_player_list", players)
+	else:
+		print("Player not found: ", id)
 
 func _on_lobby_start_game():
 	print("Received start game signal from lobby")
 	rpc("_start_game_rpc")
-	
+
 func _add_ai_player():
 	var ai_id = players.size() + 1  # Assign a unique ID to the AI player
-	var ai_player = {
-		"id": ai_id,
-		"name": "AI Player " + str(ai_id),
-		"role": null,
-		"score": 0,
-		"budget": ceo_starting_budget,
-		"is_ai": true
-	}
-	players[ai_id] = ai_player
+	add_player(ai_id, true)
 	ai_players.append(ai_id)
-	rpc("_update_player_list", players)
-	if has_node("Lobby"):
-		get_node("Lobby").update_player_list(players)
 
 func _remove_ai_player():
-	if ai_players.size() > 0:
+	if ai_players:
 		var ai_id = ai_players.pop_back()
-		players.erase(ai_id)
-		rpc("_update_player_list", players)
-		if has_node("Lobby"):
-			get_node("Lobby").update_player_list(players)
+		remove_player(ai_id)
+
+func compress_ip(ip):
+	var parts = ip.split('.')
+	var num = (int(parts[0]) << 24) | (int(parts[1]) << 16) | (int(parts[2]) << 8) | int(parts[3])
+	return base_36_encode(num)
+
+func decompress_ip(compressed):
+	var num = base_36_decode(compressed)
+	return "%d.%d.%d.%d" % [(num >> 24) & 255, (num >> 16) & 255, (num >> 8) & 255, num & 255]
+
+func base_36_encode(number):
+	if number == 0:
+		return '0'
+	var base36 = ''
+	while number != 0:
+		var quotient = number / 36
+		var remainder = number % 36
+		base36 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"[remainder] + base36
+		number = quotient
+	return base36
+
+func base_36_decode(number):
+	var result = 0
+	for digit in number:
+		result = result * 36 + "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ".find(digit)
+	return result
