@@ -20,6 +20,32 @@ func _ready():
 	_create_game_settings_display()
 	_create_start_button()
 	_create_ai_controls()
+	
+func _create_player_card():
+	var card = Panel.new()
+	card.set_custom_minimum_size(Vector2(100, 150))
+	
+	var avatar = TextureRect.new()
+	avatar.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP, Control.PRESET_MODE_MINSIZE, 10)
+	card.add_child(avatar)
+	
+	var name_label = Label.new()
+	name_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_MINSIZE, 10)
+	card.add_child(name_label)
+	
+	return card
+
+func update_player_list(players):
+	for i in range(player_cards.size()):
+		if i < players.size():
+			var player = players.values()[i]
+			var card = player_cards[i]
+			var avatar_texture = load("res://assets/avatars/avatar_%02d.png" % player["avatar"])
+			card.get_node("TextureRect").texture = avatar_texture
+			card.get_node("Label").text = player["name"]
+			card.show()
+		else:
+			player_cards[i].hide()
 
 func _load_avatars():
 	for i in range(1, 21):  # Assuming 20 avatar images
@@ -40,21 +66,6 @@ func _create_player_cards():
 		var card = _create_player_card()
 		card_container.add_child(card)
 		player_cards.append(card)
-
-func _create_player_card():
-	var card = Panel.new()
-	card.set_custom_minimum_size(Vector2(100, 150))
-	
-	var avatar = TextureRect.new()
-	avatar.texture = avatars[randi() % avatars.size()]
-	avatar.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP, Control.PRESET_MODE_MINSIZE, 10)
-	card.add_child(avatar)
-	
-	var name_label = Label.new()
-	name_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_MINSIZE, 10)
-	card.add_child(name_label)
-	
-	return card
 
 func _create_room_code_display():
 	whiteboard = TextureRect.new()
@@ -122,17 +133,6 @@ func _create_ai_controls():
 	var remove_ai_button = HitboxGenerator.create_texture_button_with_hitbox("res://assets/buttons/remove_ai.png")
 	remove_ai_button.connect("pressed", Callable(self, "_on_remove_ai_pressed"))
 	ai_control_container.add_child(remove_ai_button)
-
-func update_player_list(players):
-	for i in range(player_cards.size()):
-		if i < players.size():
-			var player = players.values()[i]
-			var card = player_cards[i]
-			card.get_node("TextureRect").texture = avatars[randi() % avatars.size()]
-			card.get_node("Label").text = player["name"]
-			card.show()
-		else:
-			player_cards[i].hide()
 
 func update_lobby_codes(global_code, local_code):
 	global_code_label.text = "Global Code: " + global_code

@@ -40,12 +40,12 @@ func _create_podium():
 		if i < sorted_players.size():
 			var player = sorted_players[i]
 			var avatar = TextureRect.new()
-			avatar.texture = avatars[randi() % avatars.size()]
+			avatar.texture = load("res://assets/avatars/avatar_%02d.png" % player["avatar"])
 			avatar.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP, Control.PRESET_MODE_MINSIZE, 10)
 			pedestal.add_child(avatar)
 			
 			var name_label = Label.new()
-			name_label.text = player.name
+			name_label.text = player["name"]
 			name_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_MINSIZE, 10)
 			pedestal.add_child(name_label)
 		
@@ -72,15 +72,15 @@ func _create_leaderboard():
 		var item = HBoxContainer.new()
 		
 		var avatar = TextureRect.new()
-		avatar.texture = avatars[randi() % avatars.size()]
+		avatar.texture = load("res://assets/avatars/avatar_%02d.png" % player["avatar"])
 		item.add_child(avatar)
 		
 		var name_label = Label.new()
-		name_label.text = player.name
+		name_label.text = player["name"]
 		item.add_child(name_label)
 		
 		var score_label = Label.new()
-		score_label.text = "Score: %d" % player.score
+		score_label.text = "Score: %d" % player["score"]
 		item.add_child(score_label)
 		
 		list.add_child(item)

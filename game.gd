@@ -2,6 +2,7 @@ extends Node2D
 
 const Role = preload("res://main.gd").Role
 const GameState = preload("res://main.gd").GameState
+const AIPlayer = preload("res://ai_player.gd")
 
 signal game_ended
 
@@ -456,6 +457,7 @@ func _show_resume(resume):
 	resume_popup.add_child(close_button)
 
 func _handle_ai_actions(delta):
+	for ai_id in ai_players:
 		ai_players[ai_id].make_decision()
 
 func make_offer(ceo_id, candidate_id, amount):

@@ -15,6 +15,7 @@ enum GameState { LOBBY, PLAYING, ENDED }
 
 var players = {}
 var resumes = []
+var available_avatars = []
 var peer = ENetMultiplayerPeer.new()
 var main_menu: Control
 var game_instance: Node2D
@@ -57,6 +58,45 @@ func _ready():
 	
 	get_public_ip()
 	get_local_ip()
+	_initialize_avatars()
+
+func _initialize_avatars():
+	available_avatars = range(1, 9)  # Creates a list [1, 2, 3, 4, 5, 6, 7, 8]
+
+func add_player(id, is_ai = false):
+	if id not in players:
+		var avatar_index = _get_unique_avatar()
+		players[id] = {
+			"role": null, 
+			"score": 0, 
+			"budget": ceo_starting_budget, 
+			"name": "AI Player " + str(id) if is_ai else "Player " + str(id),
+			"is_ai": is_ai,
+			"avatar": avatar_index
+		}
+		print("Player added: ", players[id])
+	else:
+		print("Player already exists: ", players[id])
+	rpc("_update_player_list", players)
+
+func _get_unique_avatar():
+	if available_avatars.is_empty():
+		# If all avatars are used, reset the list
+		_initialize_avatars()
+	var index = randi() % available_avatars.size()
+	var avatar = available_avatars[index]
+	available_avatars.remove_at(index)
+	return avatar
+
+func remove_player(id):
+	if id in players:
+		# Return the avatar to the available list
+		available_avatars.append(players[id]["avatar"])
+		players.erase(id)
+		print("Player removed: ", id)
+		rpc("_update_player_list", players)
+	else:
+		print("Player not found: ", id)
 
 func create_server():
 	is_host = true
@@ -401,18 +441,39 @@ func _show_results_screen():
 	add_child(results_scene)
 
 func _get_game_statistics():
+	var ceos = []
+	var candidates = []
+	var scores = []
+	var hires = []
+	var final_offers = []
+	
+	for p in players.values():
+		if p["role"] == Role.CEO:
+			ceos.append(p)
+			hires.append(p.get("hires", 0))
+		elif p["role"] == Role.CANDIDATE:
+			candidates.append(p)
+			final_offers.append(p.get("final_offer", 0))
+		scores.append(p["score"])
+	
 	var stats = {
 		"Total Rounds": total_rounds,
 		"Total Players": players.size(),
-		"CEOs": len([p for p in players.values() if p["role"] == Role.CEO]),
-		"Candidates": len([p for p in players.values() if p["role"] == Role.CANDIDATE]),
-		"Highest Score": max([p["score"] for p in players.values()]),
-		"Lowest Score": min([p["score"] for p in players.values()]),
-		"Average Score": float(sum([p["score"] for p in players.values()])) / players.size() if players.size() > 0 else 0,
-		"Total Hires": sum([p.get("hires", 0) for p in players.values() if p["role"] == Role.CEO]),
-		"Average Salary": float(sum([p.get("final_offer", 0) for p in players.values() if p["role"] == Role.CANDIDATE])) / len([p for p in players.values() if p["role"] == Role.CANDIDATE]) if len([p for p in players.values() if p["role"] == Role.CANDIDATE]) > 0 else 0
+		"CEOs": len(ceos),
+		"Candidates": len(candidates),
+		"Highest Score": max(scores),
+		"Lowest Score": min(scores),
+		"Average Score": float(sum(scores)) / players.size() if players.size() > 0 else 0,
+		"Total Hires": sum(hires),
+		"Average Salary": float(sum(final_offers)) / len(candidates) if len(candidates) > 0 else 0
 	}
 	return stats
+
+func sum(array):
+	var total = 0
+	for item in array:
+		total += item
+	return total
 
 func _load_resumes():
 	var file = FileAccess.open("res://data/resumes.json", FileAccess.READ)
@@ -454,28 +515,6 @@ func get_game_settings():
 		"ceo_starting_budget": ceo_starting_budget,
 		"total_rounds": total_rounds
 	}
-
-func add_player(id, is_ai = false):
-	if id not in players:
-		players[id] = {
-			"role": null, 
-			"score": 0, 
-			"budget": ceo_starting_budget, 
-			"name": "AI Player " + str(id) if is_ai else "Player " + str(id),
-			"is_ai": is_ai
-		}
-		print("Player added: ", players[id])
-	else:
-		print("Player already exists: ", players[id])
-	rpc("_update_player_list", players)
-
-func remove_player(id):
-	if id in players:
-		players.erase(id)
-		print("Player removed: ", id)
-		rpc("_update_player_list", players)
-	else:
-		print("Player not found: ", id)
 
 func _on_lobby_start_game():
 	print("Received start game signal from lobby")
