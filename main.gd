@@ -258,15 +258,12 @@ func _initialize_main_menu():
 	main_menu = Control.new()
 	main_menu.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	
-	var background = AnimatedTexture.new()
-	background.frames = 30  # Adjust based on your GIF
-	for i in range(30):
-		background.set_frame_texture(i, load("res://assets/backgrounds/office_anim_%02d.png" % i))
-	
-	var background_texture = TextureRect.new()
-	background_texture.texture = background
-	background_texture.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	main_menu.add_child(background_texture)
+	var background = TextureRect.new()
+	background.texture = load("res://assets/backgrounds/office_background.png")
+	background.expand = true
+	background.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	main_menu.add_child(background)
 	
 	var vbox = VBoxContainer.new()
 	vbox.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
