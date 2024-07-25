@@ -5,10 +5,9 @@ const MAX_PLAYERS = 8
 const DEFAULT_PORT = 4242
 const DEFAULT_ROUND_DURATION = 300  # 5 minutes in seconds
 const DEFAULT_CEO_STARTING_BUDGET = 1000000
-const STUN_SERVER = "stun.l.google.com"
-const STUN_PORT = 19302
 const IP_CHECK_INTERVAL = 60  # Check IP every 60 seconds
 const IP_CHECK_URL = "https://api.ipify.org"
+const DESIGN_RESOLUTION = Vector2(1920, 1080)  # Our target design resolution
 
 enum Role { CEO, CANDIDATE }
 enum GameState { LOBBY, PLAYING, ENDED }
@@ -28,11 +27,12 @@ var global_lobby_code = ""
 var local_lobby_code = ""
 var ai_players = []
 var is_host = false
-var connected_peers = []
+var connected_peers = {}
 var host_ip = ""
 var is_connecting = false
 var ip_check_timer = Timer.new()
 var http_request = HTTPRequest.new()
+
 
 @onready var background_music: AudioStreamPlayer = $BackgroundMusic
 @onready var sfx_player: AudioStreamPlayer = $SFXPlayer
@@ -40,6 +40,7 @@ var http_request = HTTPRequest.new()
 var custom_theme: Theme
 
 func _ready():
+	_setup_viewport_scaling()
 	multiplayer.peer_connected.connect(self._player_connected)
 	multiplayer.peer_disconnected.connect(self._player_disconnected)
 	multiplayer.connected_to_server.connect(self._connected_to_server)
@@ -47,6 +48,7 @@ func _ready():
 	
 	ip_check_timer.connect("timeout", self._check_ip)
 	add_child(ip_check_timer)
+	ip_check_timer.start(IP_CHECK_INTERVAL)
 	
 	add_child(http_request)
 	http_request.connect("request_completed", self._on_ip_request_completed)
@@ -57,11 +59,106 @@ func _ready():
 	_load_audio()
 	
 	get_public_ip()
-	get_local_ip()
 	_initialize_avatars()
+	
+
+func get_public_ip():
+	http_request.request(IP_CHECK_URL)
+	
+func _check_connection_to_peer(peer_id):
+	if not multiplayer.multiplayer_peer.get_connected_peers().has(peer_id):
+		print("Lost connection to peer: ", peer_id)
+		_handle_peer_disconnect(peer_id)
+
+func _check_connection_to_host():
+	if not multiplayer.multiplayer_peer or not multiplayer.multiplayer_peer.get_connected_peers().has(1):
+		print("Lost connection to host")
+		_handle_host_disconnect()
+
+func _check_ip():
+	get_public_ip()
+	if is_host:
+		for peer_id in connected_peers.keys():
+			_check_connection_to_peer(peer_id)
+	else:
+		_check_connection_to_host()
+
+func _handle_peer_disconnect(peer_id):
+	connected_peers.erase(peer_id)
+	players.erase(peer_id)
+	rpc("_update_player_list", players)
+
+func _handle_host_disconnect():
+	get_public_ip()
+	if multiplayer.multiplayer_peer:
+		rpc_id(1, "update_client_ip", multiplayer.get_unique_id(), external_ip)
+	else:
+		print("No active multiplayer peer. Unable to update host about client IP.")
+
+@rpc("any_peer")
+func update_client_ip(client_id, new_ip):
+	if is_host:
+		print("Updating IP for client: ", client_id, " to ", new_ip)
+		connected_peers[client_id] = new_ip
+		multiplayer.multiplayer_peer.set_peer_address(client_id, new_ip, DEFAULT_PORT)
+
+@rpc("any_peer")
+func update_host_ip(new_ip):
+	if not is_host:
+		print("Updating host IP to: ", new_ip)
+		host_ip = new_ip
+		join_lobby(compress_ip(new_ip))
+
+func _on_ip_request_completed(result, response_code, headers, body):
+	if result == HTTPRequest.RESULT_SUCCESS:
+		var new_ip = body.get_string_from_utf8()
+		if new_ip != external_ip:
+			external_ip = new_ip
+			host_ip = external_ip
+			global_lobby_code = compress_ip(external_ip)
+			if is_host:
+				_notify_peers_of_ip_change()
+			else:
+				rpc_id(1, "update_client_ip", multiplayer.get_unique_id(), external_ip)
+		print("Public IP: ", external_ip)
+		_update_lobby_ip()
+	else:
+		print("Failed to get public IP")
+
+func _notify_peers_of_ip_change():
+	for peer_id in connected_peers:
+		rpc_id(peer_id, "update_host_ip", external_ip)
+
+func _player_connected(id):
+	print("Player connected: ", id)
+	players[id] = {"role": null, "score": 0, "budget": ceo_starting_budget, "name": "Player " + str(id)}
+	connected_peers[id] = ""  # Will be updated when we receive the client's IP
+	rpc("_update_player_list", players)
+	if is_host:
+		rpc("show_notification", "Player " + str(id) + " joined the lobby")
+	
 
 func _initialize_avatars():
 	available_avatars = range(1, 9)  # Creates a list [1, 2, 3, 4, 5, 6, 7, 8]
+	
+func _setup_viewport_scaling():
+	var window_size = DisplayServer.window_get_size()
+	var scale = min(window_size.x / float(DESIGN_RESOLUTION.x), window_size.y / float(DESIGN_RESOLUTION.y))
+	var scaled_size = (DESIGN_RESOLUTION * scale).round()
+	var margins = ((Vector2(window_size) - scaled_size) / 2).round()
+	
+	get_tree().root.content_scale_factor = scale
+	get_tree().root.content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS
+	
+	# Set the viewport size to match our scaled size
+	get_viewport().size = Vector2i(scaled_size)
+	
+	# Center the viewport in the window
+	var window = get_tree().root
+	window.position = DisplayServer.window_get_position() + Vector2i(margins)
+	
+	# Set minimum window size
+	DisplayServer.window_set_min_size(Vector2i(scaled_size))
 
 func add_player(id, is_ai = false):
 	if id not in players:
@@ -178,44 +275,6 @@ func _update_lobby_ip():
 	if has_node("Lobby"):
 		get_node("Lobby").update_lobby_codes(global_lobby_code, local_lobby_code)
 
-func _check_ip():
-	if is_host:
-		get_public_ip()
-
-func get_public_ip():
-	http_request.request(IP_CHECK_URL)
-
-func get_local_ip():
-	local_ip = IP.get_local_addresses()[0]  # Get the first local IP address
-	local_lobby_code = compress_ip(local_ip)
-	_update_lobby_ip()
-
-func _on_ip_request_completed(result, response_code, headers, body):
-	if result == HTTPRequest.RESULT_SUCCESS:
-		var new_ip = body.get_string_from_utf8()
-		if new_ip != external_ip:
-			external_ip = new_ip
-			host_ip = external_ip
-			global_lobby_code = compress_ip(external_ip)
-			if is_host:
-				_notify_peers_of_ip_change()
-		print("Public IP: ", external_ip)
-		_update_lobby_ip()
-	else:
-		print("Failed to get public IP")
-
-func _notify_peers_of_ip_change():
-	for peer_id in players.keys():
-		if peer_id != multiplayer.get_unique_id():
-			rpc_id(peer_id, "receive_host_ip", host_ip)
-
-func _player_connected(id):
-	print("Player connected: ", id)
-	players[id] = {"role": null, "score": 0, "budget": ceo_starting_budget, "name": "Player " + str(id)}
-	rpc("_update_player_list", players)
-	if is_host:
-		rpc("show_notification", "Player " + str(id) + " joined the lobby")
-
 @rpc("any_peer")
 func show_notification(message):
 	if has_node("Lobby"):
@@ -239,7 +298,7 @@ func _start_game_rpc():
 	_start_game()
 
 func _load_theme():
-	custom_theme = load("res://themes/cartoon_office_theme.tres")
+	custom_theme = load("res://themes/theme.tres")
 	if custom_theme:
 		get_tree().root.theme = custom_theme
 
@@ -257,6 +316,7 @@ func play_sound(sound_name):
 func _initialize_main_menu():
 	main_menu = Control.new()
 	main_menu.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(main_menu)
 	
 	var background = TextureRect.new()
 	background.texture = load("res://assets/backgrounds/office_background.png")
@@ -266,12 +326,14 @@ func _initialize_main_menu():
 	main_menu.add_child(background)
 	
 	var vbox = VBoxContainer.new()
-	vbox.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	vbox.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_MINSIZE)
+	vbox.custom_minimum_size = Vector2(400, 600)  # Set a minimum size for the container
 	main_menu.add_child(vbox)
 	
 	var title = Label.new()
 	title.text = "ResumeRush"
-	title.add_theme_font_size_override("font_size", 32)
+	title.add_theme_font_size_override("font_size", 64)  # Increase font size
+	title.custom_minimum_size = Vector2(0, 100)  # Set a minimum height for the title
 	vbox.add_child(title)
 	
 	var buttons = [
@@ -283,11 +345,14 @@ func _initialize_main_menu():
 
 	for button_data in buttons:
 		var button = HitboxGenerator.create_texture_button_with_hitbox("res://assets/ui/" + button_data["icon"])
+		button.custom_minimum_size = Vector2(300, 80)  # Set a minimum size for buttons
 		button.connect("pressed", Callable(self, button_data["action"]))
+		
 		_animate_button(button)
 		vbox.add_child(button)
 	
-	add_child(main_menu)
+	# Add some spacing between buttons
+	vbox.add_theme_constant_override("separation", 20)
 
 func _animate_button(button: TextureButton):
 	button.modulate.a = 0
@@ -424,7 +489,7 @@ func _initialize_game():
 		get_node("Lobby").queue_free()
 	
 	game_instance = preload("res://game.tscn").instantiate()
-	game_instance.initialize(players, round_duration, ceo_starting_budget, total_rounds, custom_theme, resumes, ai_players)
+	game_instance.initialize(players, round_duration, ceo_starting_budget, total_rounds, resumes, ai_players)
 	game_instance.connect("game_ended", Callable(self, "_on_game_ended"))
 	add_child(game_instance)
 
@@ -527,16 +592,26 @@ func _remove_ai_player():
 		var ai_id = ai_players.pop_back()
 		remove_player(ai_id)
 
-func compress_ip(ip):
-	var parts = ip.split('.')
-	var num = (int(parts[0]) << 24) | (int(parts[1]) << 16) | (int(parts[2]) << 8) | int(parts[3])
+func compress_ip(ip: String) -> String:
+	var parts = ip.split(".")
+	if parts.size() != 4:
+		print(ip)
+		push_error("Invalid IP address format")
+		return ""
+	
+	var num = (parts[0].to_int() << 24) | (parts[1].to_int() << 16) | (parts[2].to_int() << 8) | parts[3].to_int()
 	return base_36_encode(num)
 
-func decompress_ip(compressed):
+func decompress_ip(compressed: String) -> String:
 	var num = base_36_decode(compressed)
-	return "%d.%d.%d.%d" % [(num >> 24) & 255, (num >> 16) & 255, (num >> 8) & 255, num & 255]
+	return "%d.%d.%d.%d" % [
+		(num >> 24) & 255,
+		(num >> 16) & 255,
+		(num >> 8) & 255,
+		num & 255
+	]
 
-func base_36_encode(number):
+func base_36_encode(number: int) -> String:
 	if number == 0:
 		return '0'
 	var base36 = ''
@@ -547,7 +622,7 @@ func base_36_encode(number):
 		number = quotient
 	return base36
 
-func base_36_decode(number):
+func base_36_decode(number: String) -> int:
 	var result = 0
 	for digit in number:
 		result = result * 36 + "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ".find(digit)

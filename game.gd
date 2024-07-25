@@ -13,6 +13,8 @@ var game_state = GameState.PLAYING
 var resumes = []
 var offers = {}
 var accepted_offers = []
+var current_player_role: int
+var player_ui: Control
 
 var ceo_section: Control
 var candidate_section: Control
@@ -29,7 +31,8 @@ var ai_players = {}
 var emojis = ["👍", "👎", "😊", "😢", "💼", "💰"]
 
 func _ready():
-	_create_split_screen()
+	current_player_role = players[multiplayer.get_unique_id()]["role"]
+	_create_player_ui()
 	_create_common_elements()
 	_create_chat_sidebar()
 	_create_notification_area()
@@ -46,62 +49,74 @@ func initialize(p_players, p_round_duration, p_ceo_starting_budget, p_total_roun
 	for ai_id in p_ai_players:
 		ai_players[ai_id] = AIPlayer.new(players[ai_id]["role"], ai_id, players[ai_id]["budget"], players[ai_id].get("resume", {}), self)
 
-func _create_split_screen():
-	var split_container = HBoxContainer.new()
-	split_container.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(split_container)
-	
-	ceo_section = Control.new()
-	ceo_section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	split_container.add_child(ceo_section)
-	
-	candidate_section = Control.new()
-	candidate_section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	split_container.add_child(candidate_section)
-	
-	_create_ceo_ui()
-	_create_candidate_ui()
+func _create_player_ui():
+	player_ui = Control.new()
+	player_ui.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(player_ui)
+
+	var background = TextureRect.new()
+	background.texture = load("res://assets/backgrounds/" + ("ceo_office.png" if current_player_role == Role.CEO else "candidate_room.png"))
+	background.expand = true
+	background.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	player_ui.add_child(background)
+
+	if current_player_role == Role.CEO:
+		_create_ceo_ui()
+	else:
+		_create_candidate_ui()
 
 func _create_ceo_ui():
 	var budget_display = TextureProgressBar.new()
 	budget_display.texture_progress = load("res://assets/ui/money_stack.png")
+	budget_display.custom_minimum_size = Vector2(300, 50)
 	budget_display.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT, Control.PRESET_MODE_MINSIZE, 20)
-	ceo_section.add_child(budget_display)
+	player_ui.add_child(budget_display)
 	
 	var candidate_list = ItemList.new()
+	candidate_list.custom_minimum_size = Vector2(400, 600)
 	candidate_list.set_anchors_and_offsets_preset(Control.PRESET_LEFT_WIDE, Control.PRESET_MODE_MINSIZE, 20)
 	candidate_list.connect("item_selected", Callable(self, "_on_candidate_selected"))
-	ceo_section.add_child(candidate_list)
+	player_ui.add_child(candidate_list)
 	
 	var offer_input = LineEdit.new()
+	offer_input.custom_minimum_size = Vector2(200, 50)
 	offer_input.placeholder_text = "Enter offer amount"
 	offer_input.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT, Control.PRESET_MODE_MINSIZE, 20)
-	ceo_section.add_child(offer_input)
+	player_ui.add_child(offer_input)
 	
 	var make_offer_button = HitboxGenerator.create_texture_button_with_hitbox("res://assets/buttons/make_offer.png")
+	make_offer_button.custom_minimum_size = Vector2(150, 50)
 	make_offer_button.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT, Control.PRESET_MODE_MINSIZE, 20)
 	make_offer_button.position.x = offer_input.position.x + offer_input.size.x + 10
 	make_offer_button.connect("pressed", Callable(self, "_on_make_offer_pressed"))
-	ceo_section.add_child(make_offer_button)
+	player_ui.add_child(make_offer_button)
 
 func _create_candidate_ui():
 	var resume_display = TextureRect.new()
 	resume_display.texture = load("res://assets/ui/clipboard.png")
 	resume_display.expand = true
 	resume_display.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	candidate_section.add_child(resume_display)
+	resume_display.custom_minimum_size = Vector2(400, 600)
+	resume_display.set_anchors_and_offsets_preset(Control.PRESET_LEFT_WIDE, Control.PRESET_MODE_MINSIZE, 20)
+	player_ui.add_child(resume_display)
 	
 	var resume_text = RichTextLabel.new()
+	resume_text.bbcode_enabled = true
+	resume_text.fit_content = true
+	resume_text.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT, Control.PRESET_MODE_MINSIZE, 20)
 	resume_display.add_child(resume_text)
 	
 	var offer_list = ItemList.new()
-	offer_list.set_anchors_and_offsets_preset(Control.PRESET_CENTER_RIGHT, Control.PRESET_MODE_MINSIZE, 20)
-	candidate_section.add_child(offer_list)
+	offer_list.custom_minimum_size = Vector2(400, 300)
+	offer_list.set_anchors_and_offsets_preset(Control.PRESET_RIGHT_WIDE, Control.PRESET_MODE_MINSIZE, 20)
+	player_ui.add_child(offer_list)
 	
 	var accept_offer_button = HitboxGenerator.create_texture_button_with_hitbox("res://assets/buttons/accept_offer.png")
+	accept_offer_button.custom_minimum_size = Vector2(200, 50)
 	accept_offer_button.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT, Control.PRESET_MODE_MINSIZE, 20)
 	accept_offer_button.connect("pressed", Callable(self, "_on_accept_offer_pressed"))
-	candidate_section.add_child(accept_offer_button)
+	player_ui.add_child(accept_offer_button)
 
 func _create_common_elements():
 	var timer = TextureProgressBar.new()
@@ -280,8 +295,10 @@ func _on_return_to_menu_pressed():
 	get_tree().change_scene_to_file("res://main_menu.tscn")
 
 func _on_make_offer_pressed():
-	var offer_input = ceo_section.get_node("OfferInput")
-	var candidate_list = ceo_section.get_node("CandidateList")
+	if current_player_role != Role.CEO:
+		return
+	var offer_input = player_ui.get_node("LineEdit")  # Update node path as necessary
+	var candidate_list = player_ui.get_node("ItemList")  # Update node path as necessary
 	
 	var amount = int(offer_input.text)
 	var selected_items = candidate_list.get_selected_items()
@@ -353,7 +370,10 @@ func _animate_offer_received(pos: Vector2):
 	SoundManager.play_sound("offer_received")
 
 func _on_accept_offer_pressed():
-	var offer_list = candidate_section.get_node("OfferList")
+	if current_player_role != Role.CANDIDATE:
+		return
+
+	var offer_list = player_ui.get_node("ItemList")
 	var selected_items = offer_list.get_selected_items()
 	
 	if selected_items.is_empty():

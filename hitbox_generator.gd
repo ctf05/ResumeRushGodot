@@ -24,7 +24,7 @@ static func create_texture_button_with_hitbox(texture_path: String) -> TextureBu
 	
 	var button = TextureButton.new()
 	button.texture_normal = texture
-	button.expand = true
+	button.ignore_texture_size = true
 	button.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_COVERED
 	button.size = texture.get_size()
 	
