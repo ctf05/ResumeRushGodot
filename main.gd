@@ -29,6 +29,7 @@ var ai_players = []
 var is_host = false
 var connected_peers = {}
 var host_ip = ""
+var lobby = preload("res://lobby.tscn").instantiate()
 var is_connecting = false
 var ip_check_timer = Timer.new()
 var http_request = HTTPRequest.new()
@@ -86,7 +87,7 @@ func _check_ip():
 func _handle_peer_disconnect(peer_id):
 	connected_peers.erase(peer_id)
 	players.erase(peer_id)
-	rpc("_update_player_list", players)
+	_update_player_list(players)
 
 func _handle_host_disconnect():
 	get_public_ip()
@@ -133,9 +134,9 @@ func _player_connected(id):
 	print("Player connected: ", id)
 	players[id] = {"role": null, "score": 0, "budget": ceo_starting_budget, "name": "Player " + str(id)}
 	connected_peers[id] = ""  # Will be updated when we receive the client's IP
-	rpc("_update_player_list", players)
+	_update_player_list(players)
 	if is_host:
-		rpc("show_notification", "Player " + str(id) + " joined the lobby")
+		show_notification("Player " + str(id) + " joined the lobby")
 	
 
 func _initialize_avatars():
@@ -172,9 +173,9 @@ func add_player(id, is_ai = false):
 			"avatar": avatar_index
 		}
 		print("Player added: ", players[id])
+		_update_player_list(players)
 	else:
 		print("Player already exists: ", players[id])
-	rpc("_update_player_list", players)
 
 func _get_unique_avatar():
 	if available_avatars.is_empty():
@@ -191,7 +192,7 @@ func remove_player(id):
 		available_avatars.append(players[id]["avatar"])
 		players.erase(id)
 		print("Player removed: ", id)
-		rpc("_update_player_list", players)
+		_update_player_list(players)
 	else:
 		print("Player not found: ", id)
 
@@ -215,6 +216,10 @@ func create_server():
 		return
 	multiplayer.multiplayer_peer = peer
 	print("Server created successfully on port ", DEFAULT_PORT)
+	
+	var host_id = multiplayer.get_unique_id()
+	add_player(host_id)
+	
 	_show_lobby()
 
 func join_lobby(code):
@@ -252,30 +257,27 @@ func _connection_failed():
 		_show_error_dialog("Failed to connect to the server. Please check the IP and try again.")
 		multiplayer.multiplayer_peer = null
 
-@rpc("any_peer")
 func request_host_ip():
 	var requester_id = multiplayer.get_remote_sender_id()
 	rpc_id(requester_id, "receive_host_ip", external_ip)
 
-@rpc("any_peer")
 func receive_host_ip(ip):
 	host_ip = ip
 	_update_lobby_ip()
 
 func _show_lobby():
 	main_menu.hide()
-	var lobby = preload("res://lobby.tscn").instantiate()
 	lobby.connect("start_game", Callable(self, "_on_lobby_start_game"))
 	lobby.connect("add_ai_player", Callable(self, "_add_ai_player"))
 	lobby.connect("remove_ai_player", Callable(self, "_remove_ai_player"))
 	add_child(lobby)
 	_update_lobby_ip()
+	lobby.update_player_list(players)
 
 func _update_lobby_ip():
 	if has_node("Lobby"):
 		get_node("Lobby").update_lobby_codes(global_lobby_code, local_lobby_code)
 
-@rpc("any_peer")
 func show_notification(message):
 	if has_node("Lobby"):
 		get_node("Lobby").show_notification(message)
@@ -290,7 +292,7 @@ func _player_disconnected(id):
 	print("Player disconnected: ", id)
 	players.erase(id)
 	connected_peers.erase(id)
-	rpc("_update_player_list", players)
+	_update_player_list(players)
 
 @rpc("any_peer", "call_local")
 func _start_game_rpc():
@@ -312,12 +314,21 @@ func _load_audio():
 
 func play_sound(sound_name):
 	SoundManager.play_sound(sound_name)
+	
+func _create_background():
+	var background = TextureRect.new()
+	background.texture = load("res://assets/backgrounds/lobby_background.png")
+	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	background.custom_minimum_size = Vector2(1920, 1080)
+	add_child(background)
 
 func _initialize_main_menu():
+	_create_background()
 	main_menu = Control.new()
 	main_menu.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(main_menu)
 	
+	# Background
 	var background = TextureRect.new()
 	background.texture = load("res://assets/backgrounds/office_background.png")
 	background.expand = true
@@ -325,34 +336,174 @@ func _initialize_main_menu():
 	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	main_menu.add_child(background)
 	
-	var vbox = VBoxContainer.new()
-	vbox.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_MINSIZE)
-	vbox.custom_minimum_size = Vector2(400, 600)  # Set a minimum size for the container
-	main_menu.add_child(vbox)
+	# Dark overlay
+	var overlay = ColorRect.new()
+	overlay.color = Color(0, 0, 0, 0.5)
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	main_menu.add_child(overlay)
 	
-	var title = Label.new()
-	title.text = "ResumeRush"
-	title.add_theme_font_size_override("font_size", 64)  # Increase font size
-	title.custom_minimum_size = Vector2(0, 100)  # Set a minimum height for the title
-	vbox.add_child(title)
+	# Logo
+	var logo = TextureRect.new()
+	logo.texture = load("res://assets/ui/resume_rush_logo.png")
+	logo.expand = true
+	logo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	logo.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	logo.offset_left = 660
+	logo.offset_top = 50
+	logo.offset_right = 1260
+	logo.offset_bottom = 250
+	main_menu.add_child(logo)
 	
+	# Main Button Container
+	var button_container = Panel.new()
+	button_container.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	button_container.offset_left = 740
+	button_container.offset_top = 20
+	button_container.offset_right = 1180
+	button_container.offset_bottom = 1000
+	var style_box = StyleBoxFlat.new()
+	style_box.bg_color = Color(1, 1, 1, 0.2)
+	style_box.corner_radius_top_left = 20
+	style_box.corner_radius_top_right = 20
+	style_box.corner_radius_bottom_left = 20
+	style_box.corner_radius_bottom_right = 20
+	button_container.add_theme_stylebox_override("panel", style_box)
+	main_menu.add_child(button_container)
+	
+	# Main Buttons
 	var buttons = [
 		{"text": "Host Game", "icon": "nameplate.png", "action": "_on_host_pressed"},
 		{"text": "Join Game", "icon": "id_card.png", "action": "_on_join_pressed"},
 		{"text": "Quick Play", "icon": "quick_play.png", "action": "_on_quick_play_pressed"},
 		{"text": "Settings", "icon": "gear.png", "action": "_on_settings_pressed"}
 	]
-
-	for button_data in buttons:
-		var button = HitboxGenerator.create_texture_button_with_hitbox("res://assets/ui/" + button_data["icon"])
-		button.custom_minimum_size = Vector2(300, 80)  # Set a minimum size for buttons
-		button.connect("pressed", Callable(self, button_data["action"]))
-		
-		_animate_button(button)
-		vbox.add_child(button)
 	
-	# Add some spacing between buttons
-	vbox.add_theme_constant_override("separation", 20)
+	for i in range(buttons.size()):
+		var button_data = buttons[i]
+		var button = HitboxGenerator.create_texture_button_with_hitbox("res://assets/ui/" + button_data["icon"])
+		button.stretch_mode = TextureButton.STRETCH_SCALE
+		if (i == buttons.size() - 1):
+			button.custom_minimum_size = Vector2(100, 100)
+			button.offset_left = 130
+			button.offset_top = 400 + (i * 130)
+			button.offset_right = 290
+			button.offset_bottom = 500 + (i * 130)
+		else:
+			button.custom_minimum_size = Vector2(400, 100)
+			button.offset_left = 20
+			button.offset_top = 400 + (i * 130)
+			button.offset_right = 400
+			button.offset_bottom = 100 + (i * 130)
+		button.connect("pressed", Callable(self, button_data["action"]))
+		button.connect("mouse_entered", Callable(self, "_on_button_hover").bind(button))
+		button.connect("mouse_exited", Callable(self, "_on_button_unhover").bind(button))
+		
+		
+		button_container.add_child(button)
+	
+	# Decorative Elements
+	var decorative_elements = [
+		{"texture": "res://assets/icons/ceo.png", "position": Vector2(50, 880), "size": Vector2(150, 150)},
+		{"texture": "res://assets/icons/candidate.png", "position": Vector2(1720, 880), "size": Vector2(150, 150)},
+		{"texture": "res://assets/ui/money_stack.png", "position": Vector2(100, 100), "size": Vector2(120, 120), "rotation": 15},
+		{"texture": "res://assets/ui/clipboard.png", "position": Vector2(1700, 100), "size": Vector2(120, 120), "rotation": -15}
+	]
+	
+	for element in decorative_elements:
+		var texture_rect = TextureRect.new()
+		texture_rect.texture = load(element["texture"])
+		texture_rect.expand = true
+		texture_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		texture_rect.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+		texture_rect.offset_left = element["position"].x
+		texture_rect.offset_top = element["position"].y
+		texture_rect.custom_minimum_size = element["size"]
+		if "rotation" in element:
+			texture_rect.rotation_degrees = element["rotation"]
+		main_menu.add_child(texture_rect)
+		
+		if "res://assets/icons/" in element["texture"]:
+			_add_bobbing_animation(texture_rect)
+		elif "res://assets/ui/" in element["texture"]:
+			_add_rotation_animation(texture_rect)
+	
+	# Particle Effects
+	var particles = GPUParticles2D.new()
+	var particle_material = ParticleProcessMaterial.new()
+	particle_material.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+	particle_material.emission_box_extents = Vector3(1920, 1, 1)
+	particle_material.direction = Vector3(0, 1, 0)
+	particle_material.spread = 10
+	particle_material.gravity = Vector3(0, 98, 0)
+	particle_material.initial_velocity_min = 50
+	particle_material.initial_velocity_max = 100
+	particle_material.scale_min = 0.05
+	particle_material.scale_max = 0.3
+	particles.process_material = particle_material
+	particles.texture = load("res://assets/ui/confetti.png")
+	particles.amount = 20
+	particles.lifetime = 5
+	main_menu.add_child(particles)
+	
+	# Footer
+	var footer = ColorRect.new()
+	footer.color = Color(0, 0, 0, 0.5)
+	footer.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	footer.offset_top = -50
+	main_menu.add_child(footer)
+	
+	var footer_text = Label.new()
+	footer_text.text = "© 2024 ResumeRush | Version 1.0"
+	footer_text.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	footer_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	footer_text.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	footer.add_child(footer_text)
+
+func _on_button_hover(button):
+	var tween = create_tween()
+	tween.tween_property(button, "scale", Vector2(1.05, 1.05), 0.1).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.parallel().tween_property(button, "modulate", Color(1.2, 1.2, 1.2), 0.1)
+
+func _on_button_unhover(button):
+	var tween = create_tween()
+	tween.tween_property(button, "scale", Vector2(1, 1), 0.1).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tween.parallel().tween_property(button, "modulate", Color(1, 1, 1), 0.1)
+
+func _add_bobbing_animation(node):
+	var animation_player = AnimationPlayer.new()
+	node.add_child(animation_player)
+	
+	var animation_library = AnimationLibrary.new()
+	var animation = Animation.new()
+	var track_index = animation.add_track(Animation.TYPE_VALUE)
+	animation.track_set_path(track_index, ":position:y")
+	animation.track_insert_key(track_index, 0.0, node.position.y)
+	animation.track_insert_key(track_index, 1.0, node.position.y - 20)
+	animation.track_insert_key(track_index, 2.0, node.position.y)
+	
+	animation.loop_mode = Animation.LOOP_PINGPONG
+	
+	animation_library.add_animation("bobbing", animation)
+	animation_player.add_animation_library("", animation_library)
+	animation_player.play("bobbing")
+
+func _add_rotation_animation(node):
+	var animation_player = AnimationPlayer.new()
+	node.add_child(animation_player)
+	
+	var animation_library = AnimationLibrary.new()
+	var animation = Animation.new()
+	var track_index = animation.add_track(Animation.TYPE_VALUE)
+	animation.track_set_path(track_index, ":rotation_degrees")
+	animation.track_insert_key(track_index, 0.0, node.rotation_degrees)
+	animation.track_insert_key(track_index, 1.0, node.rotation_degrees + 5)
+	animation.track_insert_key(track_index, 2.0, node.rotation_degrees)
+	
+	animation.loop_mode = Animation.LOOP_PINGPONG
+	
+	animation_library.add_animation("rotating", animation)
+	animation_player.add_animation_library("", animation_library)
+	animation_player.play("rotating")
 
 func _animate_button(button: TextureButton):
 	button.modulate.a = 0
@@ -364,14 +515,6 @@ func _on_host_pressed():
 	play_sound("button_click")
 	create_server()
 	_show_lobby()
-	_show_host_ip()
-
-func _show_host_ip():
-	var dialog = AcceptDialog.new()
-	dialog.title = "Your IP Address"
-	dialog.dialog_text = "Your IP address (give this to other players): " + external_ip
-	add_child(dialog)
-	dialog.popup_centered()
 
 func _on_join_pressed():
 	play_sound("button_click")
@@ -461,9 +604,7 @@ func _show_options_menu():
 
 @rpc("any_peer", "reliable")
 func _update_player_list(new_players):
-	players = new_players
-	if has_node("Lobby"):
-		get_node("Lobby").update_player_list(players)
+	lobby.update_player_list(new_players)
 
 func _start_game():
 	print("Starting game...")
@@ -482,7 +623,7 @@ func _assign_roles():
 		players[player_ids[i]]["role"] = role
 		if role == Role.CANDIDATE:
 			players[player_ids[i]]["resume"] = _assign_resume()
-	rpc("_update_player_list", players)
+	_update_player_list(players)
 
 func _initialize_game():
 	if has_node("Lobby"):
