@@ -317,7 +317,7 @@ func play_sound(sound_name):
 	
 func _create_background():
 	var background = TextureRect.new()
-	background.texture = load("res://assets/backgrounds/lobby_background.png")
+	background.texture = load("res://assets/backgrounds/office_background.png")
 	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	background.custom_minimum_size = Vector2(1920, 1080)
 	add_child(background)

@@ -27,6 +27,7 @@ func _init(p_role: int, p_player_id: int, p_budget: float, p_resume: Dictionary,
 	patience = randf()
 
 func make_decision():
+	print(str(player_id) + " AI making decision")
 	if role == game_instance.Role.CEO:
 		make_ceo_decision()
 	else:

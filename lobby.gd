@@ -168,6 +168,7 @@ func _create_room_code_display():
 	whiteboard.add_child(codes_container)
 
 	code_label = Label.new()
+	code_label.add_theme_color_override("font_color", Color.BLACK)
 	codes_container.add_child(code_label)
 
 func _create_chat_system():

@@ -14,14 +14,20 @@ var resumes = []
 var offers = {}
 var accepted_offers = []
 var current_player_role: int
+var player_ui: Control
 
-var chat_sidebar: Control
-var notification_area: Control
+var chat_window: Panel
+var notification_area: Panel
 var emoji_panel: Panel
+var notification_vbox: VBoxContainer
+var notification_scroll: ScrollContainer
 
 var round_duration = 300  # Default value, will be set by main script
 var ceo_starting_budget = 1000000  # Default value, will be set by main script
 var total_rounds = 3  # Default value, will be set by main script
+
+var chat_histories = {}
+var current_chat_partner = "Everyone"
 
 var ai_players = {}
 
@@ -34,7 +40,7 @@ func _ready():
 		_create_ceo_ui()
 	else:
 		_create_candidate_ui()
-	_create_chat_sidebar()
+	_create_chat_window()
 	_create_notification_area()
 	_create_emoji_panel()
 	_start_round()
@@ -51,242 +57,306 @@ func initialize(p_players, p_round_duration, p_ceo_starting_budget, p_total_roun
 
 func _create_common_elements():
 	var background = TextureRect.new()
-	background.texture = load("res://assets/backgrounds/" + ("ceo_office.png" if current_player_role == Role.CEO else "candidate_room.png"))
+	background.texture = load("res://assets/backgrounds/" + ("ceo_background.png" if current_player_role == Role.CEO else "candidate_background.png"))
 	background.expand = true
 	background.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(background)
 
+	var score_label = Label.new()
+	score_label.name = "ScoreLabel"
+	score_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	score_label.set_offset(SIDE_LEFT, 860)
+	score_label.set_offset(SIDE_TOP, 10)
+	score_label.set_offset(SIDE_RIGHT, 1060)
+	score_label.set_offset(SIDE_BOTTOM, 50)
+	score_label.add_theme_color_override("font_color", Color.BLACK)
+	score_label.text = "Score: 0"
+	add_child(score_label)
+
 	var timer = TextureProgressBar.new()
 	timer.name = "Timer"
 	timer.texture_progress = load("res://assets/ui/clock.png")
-	timer.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	timer.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
 	timer.set_offset(SIDE_LEFT, 860)
-	timer.set_offset(SIDE_TOP, 10)
+	timer.set_offset(SIDE_TOP, 60)
 	timer.set_offset(SIDE_RIGHT, 1060)
-	timer.set_offset(SIDE_BOTTOM, 60)
+	timer.set_offset(SIDE_BOTTOM, 110)
 	add_child(timer)
-	
-	var score_display = Label.new()
-	score_display.name = "ScoreLabel"
-	score_display.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	score_display.set_offset(SIDE_LEFT, 1720)
-	score_display.set_offset(SIDE_TOP, 10)
-	score_display.set_offset(SIDE_RIGHT, 1910)
-	score_display.set_offset(SIDE_BOTTOM, 50)
-	add_child(score_display)
 
-func _create_ceo_ui():
-	var budget_display = TextureProgressBar.new()
-	budget_display.name = "BudgetDisplay"
-	budget_display.texture_progress = load("res://assets/ui/money_stack.png")
-	budget_display.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	budget_display.set_offset(SIDE_LEFT, 10)
-	budget_display.set_offset(SIDE_TOP, 10)
-	budget_display.set_offset(SIDE_RIGHT, 310)
-	budget_display.set_offset(SIDE_BOTTOM, 60)
-	add_child(budget_display)
-	
-	var budget_label = Label.new()
-	budget_label.name = "BudgetLabel"
-	budget_label.text = "Budget: $" + str(ceo_starting_budget)
-	budget_label.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	budget_label.set_offset(SIDE_LEFT, 10)
-	budget_label.set_offset(SIDE_TOP, 70)
-	budget_label.set_offset(SIDE_RIGHT, 310)
-	budget_label.set_offset(SIDE_BOTTOM, 100)
-	add_child(budget_label)
-	
-	var candidate_list = ItemList.new()
-	candidate_list.name = "CandidateList"
-	candidate_list.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	candidate_list.set_offset(SIDE_LEFT, 10)
-	candidate_list.set_offset(SIDE_TOP, 110)
-	candidate_list.set_offset(SIDE_RIGHT, 410)
-	candidate_list.set_offset(SIDE_BOTTOM, 910)
-	candidate_list.connect("item_selected", Callable(self, "_on_candidate_selected"))
-	add_child(candidate_list)
-	
-	var offer_input = LineEdit.new()
-	offer_input.name = "OfferInput"
-	offer_input.placeholder_text = "Enter offer amount"
-	offer_input.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	offer_input.set_offset(SIDE_LEFT, 10)
-	offer_input.set_offset(SIDE_TOP, 920)
-	offer_input.set_offset(SIDE_RIGHT, 210)
-	offer_input.set_offset(SIDE_BOTTOM, 970)
-	add_child(offer_input)
-	
-	var make_offer_button = HitboxGenerator.create_texture_button_with_hitbox("res://assets/buttons/make_offer.png")
-	make_offer_button.name = "MakeOfferButton"
-	make_offer_button.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	make_offer_button.set_offset(SIDE_LEFT, 220)
-	make_offer_button.set_offset(SIDE_TOP, 920)
-	make_offer_button.set_offset(SIDE_RIGHT, 410)
-	make_offer_button.set_offset(SIDE_BOTTOM, 970)
-	make_offer_button.connect("pressed", Callable(self, "_on_make_offer_pressed"))
-	add_child(make_offer_button)
-
-func _create_candidate_ui():
 	var resume_display = TextureRect.new()
 	resume_display.name = "ResumeDisplay"
 	resume_display.texture = load("res://assets/ui/clipboard.png")
 	resume_display.expand = true
 	resume_display.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	resume_display.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	resume_display.set_offset(SIDE_LEFT, 10)
-	resume_display.set_offset(SIDE_TOP, 70)
-	resume_display.set_offset(SIDE_RIGHT, 610)
-	resume_display.set_offset(SIDE_BOTTOM, 870)
+	resume_display.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	resume_display.set_offset(SIDE_LEFT, 640)
+	resume_display.set_offset(SIDE_TOP, 120)
+	resume_display.set_offset(SIDE_RIGHT, 1280)
+	resume_display.set_offset(SIDE_BOTTOM, 1070)
 	add_child(resume_display)
-	
+
 	var resume_text = RichTextLabel.new()
 	resume_text.name = "ResumeText"
 	resume_text.bbcode_enabled = true
 	resume_text.fit_content = true
-	resume_text.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	resume_text.set_offset(SIDE_LEFT, 30)
-	resume_text.set_offset(SIDE_TOP, 90)
-	resume_text.set_offset(SIDE_RIGHT, 590)
-	resume_text.set_offset(SIDE_BOTTOM, 850)
+	resume_text.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	resume_text.set_offset(SIDE_LEFT, 40)
+	resume_text.set_offset(SIDE_TOP, 100)
+	resume_text.set_offset(SIDE_RIGHT, 600)
+	resume_text.set_offset(SIDE_BOTTOM, 800)
+	resume_text.add_theme_color_override("font_color", Color.BLACK)
 	resume_display.add_child(resume_text)
 	
+func _update_chat_display():
+	var chat_display = chat_window.get_node("ChatDisplay")
+	chat_display.clear()
+	
+	if current_chat_partner == "Everyone":
+		for message in chat_histories["Everyone"]:
+			chat_display.append_text(message + "\n")
+	else:
+		var current_player_id = str(multiplayer.get_unique_id())
+		var partner_id = str(_get_player_id_by_name(current_chat_partner))
+		for message in chat_histories[current_player_id][partner_id]:
+			chat_display.append_text(message + "\n")
+
+# Update the _on_player_selected function:
+func _on_player_selected(index):
+	var player_dropdown = chat_window.get_node("OptionButton")
+	current_chat_partner = player_dropdown.get_item_text(index)
+	_update_chat_display()
+
+# Add this helper function:
+func _get_player_id_by_name(player_name):
+	if player_name == "Everyone":
+		return "Everyone"
+	for player_id in players:
+		if players[player_id]["name"] == player_name:
+			return str(player_id)
+	return null
+	
+func _str_to_int_id(id):
+	return int(id) if id != "Everyone" else id
+
+# Update the _show_notification function to handle global and personal notifications:
+func _show_notification(message, is_global = false):
+	var notification = Label.new()
+	notification.text = message
+	
+	if is_global:
+		notification.add_theme_color_override("font_color", Color.YELLOW)
+	else:
+		notification.add_theme_color_override("font_color", Color.WHITE)
+	
+	notification_vbox.add_child(notification)
+	
+	var tween = create_tween()
+	tween.tween_property(notification, "modulate:a", 1.0, 0.5).from(0.0)
+	tween.tween_interval(3.0)
+	tween.tween_property(notification, "modulate:a", 0.0, 0.5)
+	tween.tween_callback(notification.queue_free)
+	
+	# Scroll to the bottom to show the latest notification
+	await get_tree().create_timer(0.1).timeout  # Wait for the next frame
+	notification_scroll.scroll_vertical = notification_scroll.get_v_scroll_bar().max_value
+
+func _create_notification_area():
+	notification_area = Panel.new()
+	notification_area.name = "NotificationArea"
+	notification_area.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	notification_area.set_offset(SIDE_LEFT, 0)
+	notification_area.set_offset(SIDE_TOP, 0)
+	notification_area.set_offset(SIDE_RIGHT, 640)
+	notification_area.set_offset(SIDE_BOTTOM, 540)
+	
+	var style_box = StyleBoxFlat.new()
+	style_box.bg_color = Color(0.1, 0.1, 0.1, 0.7)  # Dark, semi-transparent background
+	style_box.corner_radius_top_left = 10
+	style_box.corner_radius_top_right = 10
+	style_box.corner_radius_bottom_left = 10
+	style_box.corner_radius_bottom_right = 10
+	notification_area.add_theme_stylebox_override("panel", style_box)
+	
+	add_child(notification_area)
+	
+	notification_scroll = ScrollContainer.new()
+	notification_scroll.name = "NotificationScroll"
+	notification_scroll.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	notification_scroll.set_offset(SIDE_LEFT, 10)
+	notification_scroll.set_offset(SIDE_TOP, 10)
+	notification_scroll.set_offset(SIDE_RIGHT, -10)
+	notification_scroll.set_offset(SIDE_BOTTOM, -10)
+	notification_area.add_child(notification_scroll)
+	
+	notification_vbox = VBoxContainer.new()
+	notification_vbox.name = "NotificationVBox"
+	notification_vbox.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	notification_scroll.add_child(notification_vbox)
+
+func _create_ceo_ui():
+	var candidate_list = ItemList.new()
+	candidate_list.name = "CandidateList"
+	candidate_list.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	candidate_list.set_offset(SIDE_LEFT, 0)
+	candidate_list.set_offset(SIDE_TOP, 540)
+	candidate_list.set_offset(SIDE_RIGHT, 640)
+	candidate_list.set_offset(SIDE_BOTTOM, 950)
+	candidate_list.connect("item_selected", Callable(self, "_on_candidate_selected"))
+	add_child(candidate_list)
+
+	var offer_input = LineEdit.new()
+	offer_input.name = "OfferInput"
+	offer_input.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	offer_input.set_offset(SIDE_LEFT, 0)
+	offer_input.set_offset(SIDE_TOP, 960)
+	offer_input.set_offset(SIDE_RIGHT, 490)
+	offer_input.set_offset(SIDE_BOTTOM, 1010)
+	offer_input.placeholder_text = "Enter offer amount"
+	add_child(offer_input)
+
+	var budget_display = TextureRect.new()
+	budget_display.name = "BudgetDisplay"
+	budget_display.texture = load("res://assets/ui/money_stack.png")
+	budget_display.expand = true
+	budget_display.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	budget_display.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	budget_display.set_offset(SIDE_LEFT, 0)
+	budget_display.set_offset(SIDE_TOP, 1020)
+	budget_display.set_offset(SIDE_RIGHT, 50)
+	budget_display.set_offset(SIDE_BOTTOM, 1070)
+	add_child(budget_display)
+
+	var budget_label = Label.new()
+	budget_label.name = "BudgetLabel"
+	budget_label.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	budget_label.set_offset(SIDE_LEFT, 60)
+	budget_label.set_offset(SIDE_TOP, 1020)
+	budget_label.set_offset(SIDE_RIGHT, 490)
+	budget_label.set_offset(SIDE_BOTTOM, 1070)
+	budget_label.text = "Budget: $" + str(ceo_starting_budget)
+	budget_label.add_theme_color_override("font_color", Color.BLACK)
+	add_child(budget_label)
+
+	var make_offer_button = HitboxGenerator.create_texture_button_with_hitbox("res://assets/buttons/make_offer.png")
+	make_offer_button.name = "MakeOfferButton"
+	make_offer_button.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	make_offer_button.set_offset(SIDE_LEFT, 540)
+	make_offer_button.set_offset(SIDE_TOP, 960)
+	make_offer_button.set_offset(SIDE_RIGHT, 640)
+	make_offer_button.set_offset(SIDE_BOTTOM, 1070)
+	make_offer_button.connect("pressed", Callable(self, "_on_make_offer_pressed"))
+	add_child(make_offer_button)
+
+func _create_candidate_ui():
 	var offer_list = ItemList.new()
 	offer_list.name = "OfferList"
-	offer_list.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	offer_list.set_offset(SIDE_LEFT, 620)
-	offer_list.set_offset(SIDE_TOP, 70)
-	offer_list.set_offset(SIDE_RIGHT, 1220)
-	offer_list.set_offset(SIDE_BOTTOM, 870)
+	offer_list.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	offer_list.set_offset(SIDE_LEFT, 0)
+	offer_list.set_offset(SIDE_TOP, 540)
+	offer_list.set_offset(SIDE_RIGHT, 640)
+	offer_list.set_offset(SIDE_BOTTOM, 950)
 	add_child(offer_list)
-	
+
 	var accept_offer_button = HitboxGenerator.create_texture_button_with_hitbox("res://assets/buttons/accept_offer.png")
 	accept_offer_button.name = "AcceptOfferButton"
-	accept_offer_button.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	accept_offer_button.set_offset(SIDE_LEFT, 1020)
-	accept_offer_button.set_offset(SIDE_TOP, 880)
-	accept_offer_button.set_offset(SIDE_RIGHT, 1220)
-	accept_offer_button.set_offset(SIDE_BOTTOM, 980)
+	accept_offer_button.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	accept_offer_button.set_offset(SIDE_LEFT, 0)
+	accept_offer_button.set_offset(SIDE_TOP, 960)
+	accept_offer_button.set_offset(SIDE_RIGHT, 310)
+	accept_offer_button.set_offset(SIDE_BOTTOM, 1070)
 	accept_offer_button.connect("pressed", Callable(self, "_on_accept_offer_pressed"))
 	add_child(accept_offer_button)
 
-func _create_chat_sidebar():
-	chat_sidebar = Panel.new()
-	chat_sidebar.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	chat_sidebar.set_offset(SIDE_LEFT, 1620)
-	chat_sidebar.set_offset(SIDE_TOP, 70)
-	chat_sidebar.set_offset(SIDE_RIGHT, 1910)
-	chat_sidebar.set_offset(SIDE_BOTTOM, 980)
-	add_child(chat_sidebar)
-	
+	var decline_offer_button = HitboxGenerator.create_texture_button_with_hitbox("res://assets/buttons/decline_offer.png")
+	decline_offer_button.name = "DeclineOfferButton"
+	decline_offer_button.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	decline_offer_button.set_offset(SIDE_LEFT, 330)
+	decline_offer_button.set_offset(SIDE_TOP, 960)
+	decline_offer_button.set_offset(SIDE_RIGHT, 640)
+	decline_offer_button.set_offset(SIDE_BOTTOM, 1070)
+	decline_offer_button.connect("pressed", Callable(self, "_on_decline_offer_pressed"))
+	add_child(decline_offer_button)
+
+func _create_chat_window():
+	chat_window = Panel.new()
+	chat_window.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	chat_window.set_offset(SIDE_LEFT, 1280)
+	chat_window.set_offset(SIDE_TOP, 0)
+	chat_window.set_offset(SIDE_RIGHT, 1920)
+	chat_window.set_offset(SIDE_BOTTOM, 1020)
+	add_child(chat_window)
+
+	var player_dropdown = OptionButton.new()
+	player_dropdown.name = "OptionButton"
+	player_dropdown.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	player_dropdown.set_offset(SIDE_LEFT, 10)
+	player_dropdown.set_offset(SIDE_TOP, 10)
+	player_dropdown.set_offset(SIDE_RIGHT, 630)
+	player_dropdown.set_offset(SIDE_BOTTOM, 50)
+	player_dropdown.add_item("Everyone")
+	for player_id in players:
+		if players[multiplayer.get_unique_id()]["name"] != players[player_id]["name"]:
+			player_dropdown.add_item(players[player_id]["name"])
+	player_dropdown.connect("item_selected", Callable(self, "_on_player_selected"))
+	chat_window.add_child(player_dropdown)
+
 	var chat_display = RichTextLabel.new()
 	chat_display.name = "ChatDisplay"
-	chat_display.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE, Control.PRESET_MODE_MINSIZE, 10)
-	chat_sidebar.add_child(chat_display)
-	
+	chat_display.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	chat_display.set_offset(SIDE_LEFT, 10)
+	chat_display.set_offset(SIDE_TOP, 60)
+	chat_display.set_offset(SIDE_RIGHT, 630)
+	chat_display.set_offset(SIDE_BOTTOM, 940)
+	chat_window.add_child(chat_display)
+
 	var chat_input = LineEdit.new()
 	chat_input.name = "ChatInput"
-	chat_input.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE, Control.PRESET_MODE_MINSIZE, 10)
-	chat_sidebar.add_child(chat_input)
-	
-	var send_button = HitboxGenerator.create_texture_button_with_hitbox("res://assets/buttons/send.png")
-	send_button.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT, Control.PRESET_MODE_MINSIZE, 10)
-	send_button.connect("pressed", Callable(self, "_on_chat_send_pressed"))
-	chat_sidebar.add_child(send_button)
+	chat_input.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	chat_input.set_offset(SIDE_LEFT, 10)
+	chat_input.set_offset(SIDE_TOP, 950)
+	chat_input.set_offset(SIDE_RIGHT, 590)
+	chat_input.set_offset(SIDE_BOTTOM, 1010)
+	chat_window.add_child(chat_input)
 
-func _create_notification_area():
-	notification_area = VBoxContainer.new()
-	notification_area.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	notification_area.set_offset(SIDE_LEFT, 10)
-	notification_area.set_offset(SIDE_TOP, 340)
-	notification_area.set_offset(SIDE_RIGHT, 310)
-	notification_area.set_offset(SIDE_BOTTOM, 740)
-	add_child(notification_area)
+	var send_button = HitboxGenerator.create_texture_button_with_hitbox("res://assets/ui/paper_plane.png")
+	send_button.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	send_button.set_offset(SIDE_LEFT, 600)
+	send_button.set_offset(SIDE_TOP, 950)
+	send_button.set_offset(SIDE_RIGHT, 630)
+	send_button.set_offset(SIDE_BOTTOM, 1010)
+	send_button.connect("pressed", Callable(self, "_on_chat_send_pressed"))
+	chat_window.add_child(send_button)
+	
+	# Initialize chat histories
+	_initialize_chat_histories()
+	
+func _initialize_chat_histories():
+	chat_histories["Everyone"] = []
+	for player_id in players:
+		chat_histories[str(player_id)] = {}
+		for other_id in players:
+			if player_id != other_id:
+				chat_histories[str(player_id)][str(other_id)] = []
 
 func _create_emoji_panel():
 	emoji_panel = Panel.new()
-	emoji_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	emoji_panel.set_offset(SIDE_LEFT, 710)
+	emoji_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	emoji_panel.set_offset(SIDE_LEFT, 1280)
 	emoji_panel.set_offset(SIDE_TOP, 1020)
-	emoji_panel.set_offset(SIDE_RIGHT, 1210)
+	emoji_panel.set_offset(SIDE_RIGHT, 1920)
 	emoji_panel.set_offset(SIDE_BOTTOM, 1070)
 	add_child(emoji_panel)
-	
+
 	var hbox = HBoxContainer.new()
+	hbox.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	emoji_panel.add_child(hbox)
-	
+
 	for emoji in emojis:
 		var button = Button.new()
 		button.text = emoji
 		button.connect("pressed", Callable(self, "_on_emoji_pressed").bind(emoji))
 		hbox.add_child(button)
-
-# ... [Rest of the existing functions remain largely unchanged] ...
-
-func _on_make_offer_pressed():
-	if current_player_role != Role.CEO:
-		return
-	var offer_input = get_node("OfferInput")
-	var candidate_list = get_node("CandidateList")
-	
-	var amount = int(offer_input.text)
-	var selected_items = candidate_list.get_selected_items()
-	
-	if selected_items.is_empty():
-		_show_error("Please select a candidate first.")
-		return
-	
-	var candidate_id = players.keys()[selected_items[0]]
-	
-	if amount <= 0 or amount > players[multiplayer.get_unique_id()]["budget"]:
-		_show_error("Invalid offer amount.")
-		return
-	
-	players[multiplayer.get_unique_id()]["budget"] -= amount
-	offers[candidate_id] = {"ceo_id": multiplayer.get_unique_id(), "amount": amount}
-	
-	_animate_offer_submission(offer_input.global_position, candidate_list.get_global_position_of_item(selected_items[0]))
-	_update_budget_display()
-	_update_offers(offers)
-	
-	SoundManager.play_sound("offer_made")
-
-func _on_accept_offer_pressed():
-	if current_player_role != Role.CANDIDATE:
-		return
-
-	var offer_list = get_node("OfferList")
-	var selected_items = offer_list.get_selected_items()
-	
-	if selected_items.is_empty():
-		_show_error("Please select an offer first.")
-		return
-	
-	var offer = offers[multiplayer.get_unique_id()]
-	accepted_offers[multiplayer.get_unique_id()] = offer
-	
-	_animate_offer_accepted(offer["amount"])
-	_update_accepted_offers(accepted_offers)
-	
-	SoundManager.play_sound("offer_accepted")
-
-func _update_budget_display():
-	var budget_label = get_node("BudgetLabel")
-	budget_label.text = "Budget: $" + str(players[multiplayer.get_unique_id()]["budget"])
-	
-	var tween = create_tween()
-	tween.tween_property(budget_label, "modulate", Color.RED, 0.5)
-	tween.tween_property(budget_label, "modulate", Color.WHITE, 0.5)
-
-func _update_offer_display():
-	if players[multiplayer.get_unique_id()]["role"] == Role.CANDIDATE:
-		var offer_list = get_node("OfferList")
-		offer_list.clear()
-		
-		if multiplayer.get_unique_id() in offers:
-			var offer = offers[multiplayer.get_unique_id()]
-			offer_list.add_item("Offer from " + players[offer["ceo_id"]]["name"] + ": $" + str(offer["amount"]))
-			_animate_offer_received(offer_list.global_position)
 
 func _start_round():
 	current_round += 1
@@ -321,7 +391,7 @@ func _process(delta):
 		_end_round()
 
 func _update_timer():
-	var timer = get_node_or_null("Timer")
+	var timer = get_node("Timer")
 	timer.value = (round_timer / round_duration) * 100
 	if round_timer <= 10:
 		var tween = create_tween()
@@ -371,10 +441,6 @@ func _calculate_scores():
 func _update_score_display():
 	var score_label = get_node("ScoreLabel")
 	score_label.text = "Score: " + str(players[multiplayer.get_unique_id()]["score"])
-	
-	var tween = create_tween()
-	tween.tween_property(score_label, "modulate", Color.GREEN, 0.5)
-	tween.tween_property(score_label, "modulate", Color.WHITE, 0.5)
 
 func _end_game():
 	emit_signal("game_ended")
@@ -382,7 +448,7 @@ func _end_game():
 
 func _show_game_over_screen():
 	var game_over_panel = Panel.new()
-	game_over_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_MINSIZE)
+	game_over_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	add_child(game_over_panel)
 	
 	var vbox = VBoxContainer.new()
@@ -415,127 +481,34 @@ func _animate_game_over_screen(panel):
 func _on_return_to_menu_pressed():
 	get_tree().change_scene_to_file("res://main_menu.tscn")
 
-func _animate_offer_submission(from_pos: Vector2, to_pos: Vector2):
-	var paper_plane = Sprite2D.new()
-	paper_plane.texture = load("res://assets/ui/paper_plane.png")
-	paper_plane.position = from_pos
-	add_child(paper_plane)
+func _on_make_offer_pressed():
+	if current_player_role != Role.CEO:
+		return
+	var offer_input = get_node("OfferInput")
+	var candidate_list = get_node("CandidateList")
 	
-	var tween = create_tween()
-	tween.tween_property(paper_plane, "position", to_pos, 1.0).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
-	tween.tween_callback(paper_plane.queue_free)
-
-@rpc("any_peer", "reliable")
-func _update_offers(new_offers):
-	offers = new_offers
-	_update_offer_display()
-
-func _animate_offer_received(pos: Vector2):
-	var envelope = Sprite2D.new()
-	envelope.texture = load("res://assets/ui/envelope.png")
-	envelope.position = pos
-	add_child(envelope)
+	var amount = int(offer_input.text)
+	var selected_items = candidate_list.get_selected_items()
 	
-	var tween = create_tween()
-	tween.tween_property(envelope, "scale", Vector2(1.2, 1.2), 0.2)
-	tween.tween_property(envelope, "scale", Vector2(1.0, 1.0), 0.2)
-	tween.tween_interval(0.5)
-	tween.tween_callback(envelope.queue_free)
+	if selected_items.is_empty():
+		_show_notification("Please select a candidate first.")
+		return
 	
-	SoundManager.play_sound("offer_received")
-
-func _animate_offer_accepted(amount):
-	var accept_label = Label.new()
-	accept_label.text = "Offer Accepted: $" + str(amount)
-	accept_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	add_child(accept_label)
+	var candidate_id = players.keys()[selected_items[0]]
 	
-	var tween = create_tween()
-	tween.tween_property(accept_label, "scale", Vector2(1.5, 1.5), 0.5).from(Vector2(1, 1))
-	tween.tween_property(accept_label, "modulate:a", 0.0, 0.5)
-	tween.tween_callback(accept_label.queue_free)
+	if amount <= 0 or amount > players[multiplayer.get_unique_id()]["budget"]:
+		_show_notification("Invalid offer amount.")
+		return
 	
-	_animate_hiring(accept_label.global_position)
-
-func _animate_hiring(pos: Vector2):
-	var particles = CPUParticles2D.new()
-	particles.texture = load("res://assets/ui/confetti.png")
-	particles.position = pos
-	particles.emitting = true
-	particles.one_shot = true
-	add_child(particles)
+	players[multiplayer.get_unique_id()]["budget"] -= amount
+	offers[candidate_id] = {"ceo_id": multiplayer.get_unique_id(), "amount": amount}
 	
-	await get_tree().create_timer(2.0).timeout
-	particles.queue_free()
-
-@rpc("any_peer", "reliable")
-func _update_accepted_offers(new_accepted_offers):
-	accepted_offers = new_accepted_offers
-	_update_offer_display()
-
-func _show_error(message):
-	var error_label = Label.new()
-	error_label.text = message
-	error_label.add_theme_color_override("font_color", Color.RED)
-	error_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_MINSIZE, 20)
-	add_child(error_label)
+	_update_budget_display()
+	_update_offers(offers)
 	
-	var tween = create_tween()
-	tween.tween_property(error_label, "modulate:a", 1.0, 0.5).from(0.0)
-	tween.tween_interval(2.0)
-	tween.tween_property(error_label, "modulate:a", 0.0, 0.5)
-	tween.tween_callback(error_label.queue_free)
-
-func _on_chat_send_pressed():
-	var chat_input = chat_sidebar.get_node("ChatInput")
-	var message = chat_input.text.strip_edges()
+	_show_notification("Offer of $" + str(amount) + " made to " + players[candidate_id]["name"], true)
+	SoundManager.play_sound("offer_made")
 	
-	if message != "":
-		_add_chat_message(players[multiplayer.get_unique_id()]["name"], message)
-		rpc("_receive_chat_message", players[multiplayer.get_unique_id()]["name"], message)
-		chat_input.text = ""
-
-@rpc("any_peer", "reliable")
-func _receive_chat_message(sender_name, message):
-	_add_chat_message(sender_name, message)
-
-func _add_chat_message(sender_name, message):
-	var chat_display = chat_sidebar.get_node("ChatDisplay")
-	var formatted_message = "[color=yellow]%s:[/color] %s" % [sender_name, message]
-	chat_display.append_bbcode(formatted_message + "\n")
-	
-	var tween = create_tween()
-	tween.tween_property(chat_display, "scroll_vertical", chat_display.get_v_scroll_bar().max_value, 0.5)
-
-func _on_candidate_selected(index):
-	var candidate_id = players.keys()[index]
-	if players[candidate_id]["role"] == Role.CANDIDATE:
-		_show_resume(players[candidate_id]["resume"])
-
-func _show_resume(resume):
-	var resume_popup = Panel.new()
-	resume_popup.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_MINSIZE)
-	add_child(resume_popup)
-	
-	var resume_text = RichTextLabel.new()
-	resume_text.bbcode_text = """
-	[b]Name:[/b] %s
-	[b]Age:[/b] %d
-	[b]Education:[/b] %s
-	[b]Skills:[/b] %s
-	[b]Experience:[/b] %s
-	""" % [resume["name"], resume["age"], resume["education"], resume["skills"], resume["experience"]]
-	resume_popup.add_child(resume_text)
-	
-	var close_button = Button.new()
-	close_button.text = "Close"
-	close_button.connect("pressed", Callable(resume_popup, "queue_free"))
-	resume_popup.add_child(close_button)
-
-func _handle_ai_actions(delta):
-	for ai_id in ai_players:
-		ai_players[ai_id].make_decision()
-
 func make_offer(ceo_id, candidate_id, amount):
 	if ceo_id in players and players[ceo_id]["role"] == Role.CEO and players[ceo_id]["budget"] >= amount:
 		offers[candidate_id] = {"ceo_id": ceo_id, "amount": amount}
@@ -544,13 +517,145 @@ func make_offer(ceo_id, candidate_id, amount):
 		rpc("_update_offers", offers)
 		rpc("_update_player_list", players)
 
-func accept_offer(candidate_id, ceo_id, amount):
-	if candidate_id in players and players[candidate_id]["role"] == Role.CANDIDATE:
-		if candidate_id in offers and offers[candidate_id]["ceo_id"] == ceo_id:
-			accepted_offers[candidate_id] = {"ceo_id": ceo_id, "amount": amount}
-			_update_offer_display()
-			rpc("_update_accepted_offers", accepted_offers)
+func _on_accept_offer_pressed():
+	if current_player_role != Role.CANDIDATE:
+		return
 
+	var offer_list = get_node("OfferList")
+	var selected_items = offer_list.get_selected_items()
+	
+	if selected_items.is_empty():
+		_show_notification("Please select an offer first.")
+		return
+	
+	var offer = offers[multiplayer.get_unique_id()]
+	accepted_offers[multiplayer.get_unique_id()] = offer
+	
+	_update_accepted_offers(accepted_offers)
+	
+	_show_notification("Offer of $" + str(offer["amount"]) + " accepted from " + players[offer["ceo_id"]]["name"], true)
+	SoundManager.play_sound("offer_accepted")
+
+func _on_decline_offer_pressed():
+	if current_player_role != Role.CANDIDATE:
+		return
+
+	var offer_list = get_node("OfferList")
+	var selected_items = offer_list.get_selected_items()
+	
+	if selected_items.is_empty():
+		_show_notification("Please select an offer first.")
+		return
+	
+	var offer = offers[multiplayer.get_unique_id()]
+	offers.erase(multiplayer.get_unique_id())
+	
+	_update_offers(offers)
+	
+	_show_notification("Offer of $" + str(offer["amount"]) + " declined from " + players[offer["ceo_id"]]["name"], true)
+	SoundManager.play_sound("offer_declined")
+
+func _update_budget_display():
+	var budget_label = get_node("BudgetLabel")
+	budget_label.text = "Budget: $" + str(players[multiplayer.get_unique_id()]["budget"])
+
+func _update_offer_display():
+	if current_player_role == Role.CANDIDATE:
+		var offer_list = get_node("OfferList")
+		offer_list.clear()
+		
+		if multiplayer.get_unique_id() in offers:
+			var offer = offers[multiplayer.get_unique_id()]
+			offer_list.add_item("Offer from " + players[offer["ceo_id"]]["name"] + ": $" + str(offer["amount"]))
+	elif current_player_role == Role.CEO:
+		var candidate_list = get_node("CandidateList")
+		candidate_list.clear()
+		for player_id in players:
+			if players[player_id]["role"] == Role.CANDIDATE:
+				candidate_list.add_item(players[player_id]["name"])
+
+@rpc("any_peer", "reliable")
+func _update_offers(new_offers):
+	offers = new_offers
+	_update_offer_display()
+
+@rpc("any_peer", "reliable")
+func _update_accepted_offers(new_accepted_offers):
+	accepted_offers = new_accepted_offers
+	_update_offer_display()
+
+func _on_chat_send_pressed():
+	var chat_input = chat_window.get_node("ChatInput")
+	var message = chat_input.text.strip_edges()
+	
+	if message != "":
+		var sender_id = str(multiplayer.get_unique_id())
+		var sender_name = players[int(sender_id)]["name"]
+		
+		if current_chat_partner == "Everyone":
+			_add_chat_message(sender_name, message, "Everyone")
+			rpc("_receive_chat_message", sender_name, message, "Everyone")
+		else:
+			var recipient_id = _get_player_id_by_name(current_chat_partner)
+			_add_chat_message(sender_name, message, recipient_id)
+			rpc_id(int(recipient_id), "_receive_chat_message", sender_name, message, sender_id)
+		
+		chat_input.text = ""
+		
+@rpc("any_peer", "reliable")
+func _receive_chat_message(sender_name, message, recipient):
+	if recipient == "Everyone":
+		_add_chat_message(sender_name, message, "Everyone")
+	else:
+		var recipient_id = str(recipient)
+		_add_chat_message(sender_name, message, recipient_id)
+	
+	if current_chat_partner == "Everyone" or current_chat_partner == sender_name:
+		_update_chat_display()
+
+func _add_chat_message(sender_name, message, recipient):
+	var formatted_message = "[color=yellow]%s:[/color] %s" % [sender_name, message]
+	
+	if recipient == "Everyone":
+		chat_histories["Everyone"].append(formatted_message)
+	else:
+		var sender_id = str(_get_player_id_by_name(sender_name))
+		var recipient_id = str(recipient)
+		
+		chat_histories[sender_id][recipient_id].append(formatted_message)
+		if sender_id != recipient_id:
+			chat_histories[recipient_id][sender_id].append(formatted_message)
+	
+	_update_chat_display()
+
+func _on_candidate_selected(index):
+	var candidate_id = players.keys()[index]
+	if players[candidate_id]["role"] == Role.CANDIDATE:
+		_show_resume(players[candidate_id]["resume"])
+
+func _show_resume(resume):
+	var resume_text = get_node("ResumeDisplay/ResumeText")
+	resume_text.bbcode_text = """
+	[b]Name:[/b] %s
+	[b]Age:[/b] %d
+	[b]Education:[/b] %s
+	[b]Skills:[/b] %s
+	[b]Experience:[/b] %s
+	""" % [resume["name"], resume["age"], resume["education"], resume["skills"], resume["experience"]]
+
+func _handle_ai_actions(delta):
+	for ai_id in ai_players:
+		ai_players[ai_id].make_decision()
+
+func _on_emoji_pressed(emoji):
+	rpc("_broadcast_emoji", players[multiplayer.get_unique_id()]["name"], emoji)
+
+@rpc("any_peer", "reliable")
+func _broadcast_emoji(player_name, emoji):
+	_show_notification(player_name + ": " + emoji, true)
+	SoundManager.play_sound("emoji_reaction")
+
+# Add any additional helper functions or AI-related functions here
 func get_available_candidates():
 	var available = []
 	for player_id in players:
@@ -562,36 +667,3 @@ func get_offers_for_candidate(candidate_id):
 	if candidate_id in offers:
 		return [offers[candidate_id]]
 	return []
-
-func get_remaining_time():
-	return round_timer
-
-func _on_emoji_pressed(emoji):
-	rpc("_broadcast_emoji", players[multiplayer.get_unique_id()]["name"], emoji)
-
-@rpc("any_peer", "reliable")
-func _broadcast_emoji(player_name, emoji):
-	var emoji_label = Label.new()
-	emoji_label.text = player_name + ": " + emoji
-	emoji_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP, Control.PRESET_MODE_MINSIZE, 20)
-	add_child(emoji_label)
-	
-	var tween = create_tween()
-	tween.tween_property(emoji_label, "modulate:a", 1.0, 0.5).from(0.0)
-	tween.tween_interval(2.0)
-	tween.tween_property(emoji_label, "modulate:a", 0.0, 0.5)
-	tween.tween_callback(emoji_label.queue_free)
-	
-	SoundManager.play_sound("emoji_reaction")
-
-func _animate_budget_update(amount: int):
-	var label = Label.new()
-	label.text = ("+" if amount > 0 else "") + str(amount)
-	label.add_theme_color_override("font_color", Color.GREEN if amount > 0 else Color.RED)
-	label.position = get_node("BudgetLabel").position + Vector2(0, -30)
-	add_child(label)
-	
-	var tween = create_tween()
-	tween.tween_property(label, "position:y", label.position.y - 50, 1.0)
-	tween.parallel().tween_property(label, "modulate:a", 0.0, 1.0)
-	tween.tween_callback(label.queue_free)
