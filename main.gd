@@ -31,7 +31,7 @@ var local_ip = ""
 var global_lobby_code = ""
 var local_lobby_code = ""
 var ai_players = []
-var is_host = false
+var is_host = true
 var connected_peers = {}
 var host_ip = ""
 var lobby = preload("res://lobby.tscn").instantiate()
@@ -278,6 +278,8 @@ func join_lobby(code):
 func _connected_to_server():
 	print("Successfully connected to server")
 	is_connecting = false
+	get_public_ip()  # Get our own public IP
+	rpc_id(1, "request_host_ip")  # Request the host's IP
 	_show_lobby()
 
 func _connection_failed():
@@ -287,13 +289,17 @@ func _connection_failed():
 		_show_error_dialog("Failed to connect to the server. Please check the IP and try again.")
 		multiplayer.multiplayer_peer = null
 
+@rpc("any_peer")
 func request_host_ip():
 	var requester_id = multiplayer.get_remote_sender_id()
 	rpc_id(requester_id, "receive_host_ip", external_ip)
 
+@rpc("any_peer")
 func receive_host_ip(ip):
-	host_ip = ip
-	_update_lobby_ip()
+	if not is_host:
+		host_ip = ip
+		global_lobby_code = compress_ip(ip)
+		_update_lobby_ip()
 
 func _show_lobby():
 	_initialize_connection_check_system()
@@ -314,7 +320,7 @@ func show_notification(message):
 	if has_node("Lobby"):
 		get_node("Lobby").show_notification(message)
 
-@rpc("any_peer", "reliable")
+@rpc("any_peer")
 func _update_host_ip(new_ip):
 	if not is_host:
 		print("Updating host IP to: ", new_ip)
