@@ -31,7 +31,7 @@ var local_ip = ""
 var global_lobby_code = ""
 var local_lobby_code = ""
 var ai_players = []
-var is_host = true
+var is_host = false
 var connected_peers = {}
 var host_ip = ""
 var lobby = preload("res://lobby.tscn").instantiate()
@@ -67,7 +67,6 @@ func _ready():
 	get_public_ip()
 	_initialize_avatars()
 	_initialize_connection_check_system()
-	_initialize_heartbeat_system()
 	
 func _initialize_connection_check_system():
 	connection_check_timer = Timer.new()
@@ -298,6 +297,7 @@ func receive_host_ip(ip):
 	_update_lobby_ip()
 
 func _show_lobby():
+	_initialize_heartbeat_system()
 	main_menu.hide()
 	lobby.connect("start_game", Callable(self, "_on_lobby_start_game"))
 	lobby.connect("add_ai_player", Callable(self, "_add_ai_player"))
