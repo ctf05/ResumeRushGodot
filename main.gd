@@ -66,7 +66,6 @@ func _ready():
 	
 	get_public_ip()
 	_initialize_avatars()
-	_initialize_connection_check_system()
 	
 func _initialize_connection_check_system():
 	connection_check_timer = Timer.new()
@@ -297,6 +296,7 @@ func receive_host_ip(ip):
 	_update_lobby_ip()
 
 func _show_lobby():
+	_initialize_connection_check_system()
 	_initialize_heartbeat_system()
 	main_menu.hide()
 	lobby.connect("start_game", Callable(self, "_on_lobby_start_game"))
