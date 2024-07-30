@@ -31,7 +31,7 @@ var local_ip = ""
 var global_lobby_code = ""
 var local_lobby_code = ""
 var ai_players = []
-var is_host = false
+var is_host = true
 var connected_peers = {}
 var host_ip = ""
 var lobby = preload("res://lobby.tscn").instantiate()
@@ -146,9 +146,9 @@ func _on_ip_request_completed(result, response_code, headers, body):
 		var new_ip = body.get_string_from_utf8()
 		if new_ip != external_ip:
 			external_ip = new_ip
-			host_ip = external_ip
-			global_lobby_code = compress_ip(external_ip)
 			if is_host:
+				host_ip = external_ip
+				global_lobby_code = compress_ip(external_ip)
 				_notify_peers_of_ip_change()
 			else:
 				rpc_id(1, "update_client_ip", multiplayer.get_unique_id(), external_ip)
@@ -316,9 +316,12 @@ func show_notification(message):
 
 @rpc("any_peer", "reliable")
 func _update_host_ip(new_ip):
-	external_ip = new_ip
-	print("Host IP updated to: ", external_ip)
-	_update_lobby_ip()
+	if not is_host:
+		print("Updating host IP to: ", new_ip)
+		host_ip = new_ip
+		# Only update the lobby code if we're not the host
+		global_lobby_code = compress_ip(new_ip)
+		_update_lobby_ip()
 
 func _player_disconnected(id):
 	print("Player disconnected: ", id)
