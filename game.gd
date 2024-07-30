@@ -54,6 +54,7 @@ func initialize(p_players, p_round_duration, p_ceo_starting_budget, p_total_roun
 	
 	for ai_id in p_ai_players:
 		ai_players[ai_id] = AIPlayer.new(players[ai_id]["role"], ai_id, players[ai_id]["budget"], players[ai_id].get("resume", {}), self)
+		ai_players[ai_id].ai_action_interval = 3.0
 
 func _create_common_elements():
 	var background = TextureRect.new()
@@ -444,7 +445,6 @@ func _update_score_display():
 
 func _end_game():
 	emit_signal("game_ended")
-	_show_game_over_screen()
 
 func _show_game_over_screen():
 	var game_over_panel = Panel.new()
@@ -520,7 +520,6 @@ func make_offer(ceo_id, candidate_id, amount):
 func _on_accept_offer_pressed():
 	if current_player_role != Role.CANDIDATE:
 		return
-
 	var offer_list = get_node("OfferList")
 	var selected_items = offer_list.get_selected_items()
 	
@@ -528,8 +527,18 @@ func _on_accept_offer_pressed():
 		_show_notification("Please select an offer first.")
 		return
 	
-	var offer = offers[multiplayer.get_unique_id()]
-	accepted_offers[multiplayer.get_unique_id()] = offer
+	var current_player_id = multiplayer.get_unique_id()
+	
+	var offer = offers[current_player_id]
+	
+	# Find the index of any existing offer for this player and remove it
+	for i in range(accepted_offers.size()):
+		if accepted_offers[i].has(current_player_id):
+			accepted_offers.remove(i)
+			break
+	
+	# Add the new accepted offer
+	accepted_offers.append({current_player_id: offer})
 	
 	_update_accepted_offers(accepted_offers)
 	
@@ -612,6 +621,9 @@ func _receive_chat_message(sender_name, message, recipient):
 	
 	if current_chat_partner == "Everyone" or current_chat_partner == sender_name:
 		_update_chat_display()
+		
+func receive_ai_chat_message(sender_name, message, recipient):
+	_receive_chat_message(sender_name, message, str(recipient))
 
 func _add_chat_message(sender_name, message, recipient):
 	var formatted_message = "[color=yellow]%s:[/color] %s" % [sender_name, message]
@@ -645,7 +657,7 @@ func _show_resume(resume):
 
 func _handle_ai_actions(delta):
 	for ai_id in ai_players:
-		ai_players[ai_id].make_decision()
+		ai_players[ai_id].make_decision(delta)
 
 func _on_emoji_pressed(emoji):
 	rpc("_broadcast_emoji", players[multiplayer.get_unique_id()]["name"], emoji)
@@ -667,3 +679,31 @@ func get_offers_for_candidate(candidate_id):
 	if candidate_id in offers:
 		return [offers[candidate_id]]
 	return []
+
+func get_game_state():
+	return {
+		"players": players,
+		"current_round": current_round,
+		"round_timer": round_timer,
+		"game_state": game_state,
+		"resumes": resumes,
+		"offers": offers,
+		"accepted_offers": accepted_offers
+	}
+
+func set_game_state(state):
+	players = state["players"]
+	current_round = state["current_round"]
+	round_timer = state["round_timer"]
+	game_state = state["game_state"]
+	resumes = state["resumes"]
+	offers = state["offers"]
+	accepted_offers = state["accepted_offers"]
+	_update_game_display()
+
+func _update_game_display():
+	# Update all UI elements based on the new game state
+	_update_score_display()
+	_update_timer()
+	_update_offer_display()
+	# Add any other necessary display updates

@@ -5,9 +5,13 @@ const MAX_PLAYERS = 8
 const DEFAULT_PORT = 4242
 const DEFAULT_ROUND_DURATION = 300  # 5 minutes in seconds
 const DEFAULT_CEO_STARTING_BUDGET = 1000000
-const IP_CHECK_INTERVAL = 60  # Check IP every 60 seconds
 const IP_CHECK_URL = "https://api.ipify.org"
 const DESIGN_RESOLUTION = Vector2(1920, 1080)  # Our target design resolution
+const HEARTBEAT_INTERVAL = 1.0  # Send heartbeat every 1 second
+const HEARTBEAT_TIMEOUT = 5.0   # Consider connection lost after 5 seconds without heartbeat
+const MAX_RECONNECTION_ATTEMPTS = 5
+const RECONNECTION_INTERVAL = 2.0  # Seconds between reconnection attempts
+const CONNECTION_CHECK_INTERVAL = 2.0  # Check connections every 2 seconds
 
 enum Role { CEO, CANDIDATE }
 enum GameState { LOBBY, PLAYING, ENDED }
@@ -18,6 +22,7 @@ var available_avatars = []
 var peer = ENetMultiplayerPeer.new()
 var main_menu: Control
 var game_instance: Node2D
+var results_instance: Node2D
 var round_duration = DEFAULT_ROUND_DURATION
 var ceo_starting_budget = DEFAULT_CEO_STARTING_BUDGET
 var total_rounds = 3
@@ -31,8 +36,12 @@ var connected_peers = {}
 var host_ip = ""
 var lobby = preload("res://lobby.tscn").instantiate()
 var is_connecting = false
-var ip_check_timer = Timer.new()
+var heartbeat_timer: Timer
+var last_heartbeat_time = {}
 var http_request = HTTPRequest.new()
+var reconnection_attempts = {}
+var reconnection_timer: Timer
+var connection_check_timer: Timer
 
 
 @onready var background_music: AudioStreamPlayer = $BackgroundMusic
@@ -47,10 +56,6 @@ func _ready():
 	multiplayer.connected_to_server.connect(self._connected_to_server)
 	multiplayer.connection_failed.connect(self._connection_failed)
 	
-	ip_check_timer.connect("timeout", self._check_ip)
-	add_child(ip_check_timer)
-	ip_check_timer.start(IP_CHECK_INTERVAL)
-	
 	add_child(http_request)
 	http_request.connect("request_completed", self._on_ip_request_completed)
 	
@@ -61,7 +66,33 @@ func _ready():
 	
 	get_public_ip()
 	_initialize_avatars()
+	_initialize_connection_check_system()
+	_initialize_heartbeat_system()
 	
+func _initialize_connection_check_system():
+	connection_check_timer = Timer.new()
+	connection_check_timer.wait_time = CONNECTION_CHECK_INTERVAL
+	connection_check_timer.connect("timeout", Callable(self, "_check_connections"))
+	add_child(connection_check_timer)
+	connection_check_timer.start()
+	
+func _initialize_heartbeat_system():
+	heartbeat_timer = Timer.new()
+	heartbeat_timer.wait_time = HEARTBEAT_INTERVAL
+	heartbeat_timer.connect("timeout", Callable(self, "_on_heartbeat_timer_timeout"))
+	add_child(heartbeat_timer)
+	heartbeat_timer.start()
+	
+func _on_heartbeat_timer_timeout():
+	if is_host:
+		for peer_id in connected_peers.keys():
+			rpc_id(peer_id, "_receive_heartbeat", multiplayer.get_unique_id())
+	else:
+		rpc_id(1, "_receive_heartbeat", multiplayer.get_unique_id())
+		
+@rpc("any_peer", "reliable")
+func _receive_heartbeat(sender_id):
+	last_heartbeat_time[sender_id] = Time.get_ticks_msec()
 
 func get_public_ip():
 	http_request.request(IP_CHECK_URL)
@@ -75,26 +106,26 @@ func _check_connection_to_host():
 	if not multiplayer.multiplayer_peer or not multiplayer.multiplayer_peer.get_connected_peers().has(1):
 		print("Lost connection to host")
 		_handle_host_disconnect()
-
-func _check_ip():
-	get_public_ip()
+		
+func _check_connections():
+	var current_time = Time.get_ticks_msec()
 	if is_host:
 		for peer_id in connected_peers.keys():
-			_check_connection_to_peer(peer_id)
+			if current_time - last_heartbeat_time.get(peer_id, 0) > HEARTBEAT_TIMEOUT * 1000:
+				_handle_peer_disconnect(peer_id)
 	else:
-		_check_connection_to_host()
+		if current_time - last_heartbeat_time.get(1, 0) > HEARTBEAT_TIMEOUT * 1000:
+			_handle_host_disconnect()
 
 func _handle_peer_disconnect(peer_id):
-	connected_peers.erase(peer_id)
-	players.erase(peer_id)
-	_update_player_list(players)
+	print("Lost connection to peer: ", peer_id)
+	get_public_ip()
+	_attempt_reconnection(peer_id)
 
 func _handle_host_disconnect():
+	print("Lost connection to host")
 	get_public_ip()
-	if multiplayer.multiplayer_peer:
-		rpc_id(1, "update_client_ip", multiplayer.get_unique_id(), external_ip)
-	else:
-		print("No active multiplayer peer. Unable to update host about client IP.")
+	_attempt_reconnection(1)  # Assuming host always has ID 1
 
 @rpc("any_peer")
 func update_client_ip(client_id, new_ip):
@@ -137,6 +168,7 @@ func _player_connected(id):
 	_update_player_list(players)
 	if is_host:
 		show_notification("Player " + str(id) + " joined the lobby")
+	last_heartbeat_time[id] = Time.get_ticks_msec()
 	
 
 func _initialize_avatars():
@@ -293,6 +325,7 @@ func _player_disconnected(id):
 	players.erase(id)
 	connected_peers.erase(id)
 	_update_player_list(players)
+	last_heartbeat_time.erase(id)
 
 @rpc("any_peer", "call_local")
 func _start_game_rpc():
@@ -614,6 +647,9 @@ func _start_game():
 	
 	_assign_roles()
 	_initialize_game()
+	
+func _start_results():
+	_initialize_results()
 
 func _assign_roles():
 	var player_ids = players.keys()
@@ -633,6 +669,14 @@ func _initialize_game():
 	game_instance.initialize(players, round_duration, ceo_starting_budget, total_rounds, resumes, ai_players)
 	game_instance.connect("game_ended", Callable(self, "_on_game_ended"))
 	add_child(game_instance)
+	
+func _initialize_results():
+	if has_node("Results"):
+		get_node("Results").queue_free()
+	
+	results_instance = preload("res://results.tscn").instantiate()
+	results_instance.initialize(players)
+	add_child(results_instance)
 
 func _on_game_ended():
 	game_instance.queue_free()
@@ -722,6 +766,10 @@ func get_game_settings():
 func _on_lobby_start_game():
 	print("Received start game signal from lobby")
 	rpc("_start_game_rpc")
+	
+func _on_game_start_results():
+	print("Received start results signal from game")
+	rpc("_start_results_rpc")
 
 func _add_ai_player():
 	var ai_id = players.size() + 1  # Assign a unique ID to the AI player
@@ -768,3 +816,113 @@ func base_36_decode(number: String) -> int:
 	for digit in number:
 		result = result * 36 + "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ".find(digit)
 	return result
+	
+func _attempt_reconnection(peer_id):
+	print("Attempting to reconnect to peer: ", peer_id)
+	
+	if peer_id not in reconnection_attempts:
+		reconnection_attempts[peer_id] = 0
+	
+	if reconnection_attempts[peer_id] >= MAX_RECONNECTION_ATTEMPTS:
+		print("Max reconnection attempts reached for peer ", peer_id)
+		_handle_reconnection_failed(peer_id)
+		return
+	
+	reconnection_attempts[peer_id] += 1
+	
+	if is_host:
+		_host_reconnect_to_peer(peer_id)
+	else:
+		_client_reconnect_to_host()
+	
+	# Start or restart the reconnection timer
+	if not reconnection_timer:
+		reconnection_timer = Timer.new()
+		reconnection_timer.one_shot = true
+		reconnection_timer.connect("timeout", Callable(self, "_on_reconnection_timeout").bind(peer_id))
+		add_child(reconnection_timer)
+	
+	reconnection_timer.start(RECONNECTION_INTERVAL)
+
+func _host_reconnect_to_peer(peer_id):
+	var peer_ip = connected_peers.get(peer_id, "")
+	if peer_ip:
+		print("Host attempting to reconnect to peer ", peer_id, " at IP ", peer_ip)
+		multiplayer.multiplayer_peer.create_peer(peer_id, peer_ip, DEFAULT_PORT)
+	else:
+		print("No IP address found for peer ", peer_id)
+		_handle_reconnection_failed(peer_id)
+
+func _client_reconnect_to_host():
+	print("Client attempting to reconnect to host at IP ", host_ip)
+	var error = peer.create_client(host_ip, DEFAULT_PORT)
+	if error != OK:
+		print("Failed to create client for reconnection. Error code: ", error)
+		_handle_reconnection_failed(1)  # 1 is the assumed host ID
+
+func _on_reconnection_timeout(peer_id):
+	if peer_id in connected_peers:
+		print("Reconnection successful for peer ", peer_id)
+		_handle_reconnection_success(peer_id)
+	else:
+		print("Reconnection attempt failed for peer ", peer_id)
+		_attempt_reconnection(peer_id)  # Try again
+
+func _handle_reconnection_success(peer_id):
+	reconnection_attempts.erase(peer_id)
+	if reconnection_timer:
+		reconnection_timer.stop()
+	
+	# Synchronize game state
+	_synchronize_game_state(peer_id)
+
+func _handle_reconnection_failed(peer_id):
+	reconnection_attempts.erase(peer_id)
+	if reconnection_timer:
+		reconnection_timer.stop()
+	
+	if is_host:
+		# Remove the peer from the game
+		players.erase(peer_id)
+		connected_peers.erase(peer_id)
+		_update_player_list(players)
+		print("Peer ", peer_id, " has been removed from the game due to failed reconnection")
+	else:
+		# Client failed to reconnect to host
+		print("Failed to reconnect to host. Returning to main menu.")
+		_return_to_main_menu()
+
+func _synchronize_game_state(peer_id):
+	if is_host and game_instance:
+		# Get current game state from game_instance
+		var game_state = game_instance.get_game_state()
+		# Send current game state to the reconnected peer
+		rpc_id(peer_id, "_receive_game_state", game_state)
+	else:
+		# Client requests game state from host
+		rpc_id(1, "_request_game_state")
+
+@rpc("any_peer", "reliable")
+func _receive_game_state(game_state):
+	if game_instance:
+		game_instance.set_game_state(game_state)
+
+@rpc("any_peer", "reliable")
+func _request_game_state():
+	var requester_id = multiplayer.get_remote_sender_id()
+	_synchronize_game_state(requester_id)
+	
+func _return_to_main_menu():
+	# Logic to return to the main menu
+	get_tree().change_scene_to_file("res://main.tscn")
+	
+func _update_game_display():
+	print("updating ui not implemented, unsure if necessary")
+
+func _exit_tree():
+	if heartbeat_timer:
+		heartbeat_timer.stop()
+		heartbeat_timer.queue_free()
+	if connection_check_timer:
+		connection_check_timer.stop()
+		connection_check_timer.queue_free()
