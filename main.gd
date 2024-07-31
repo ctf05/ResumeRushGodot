@@ -93,6 +93,7 @@ func _receive_heartbeat(sender_id):
 	last_heartbeat_time[sender_id] = Time.get_ticks_msec()
 
 func get_public_ip():
+	
 	http_request.request(IP_CHECK_URL)
 	
 func _check_connection_to_peer(peer_id):
@@ -270,14 +271,10 @@ func join_lobby(code):
 	print("Client peer created, waiting for connection...")
 	
 	# Set a timeout for the connection attempt
-	var timeout = 20  # 20 seconds timeout
+	var timeout = 10  # 10 seconds timeout
 	while is_connecting and timeout > 0:
 		await get_tree().create_timer(1.0).timeout
 		print("Waiting for connection... ", timeout, " seconds left")
-		if multiplayer.multiplayer_peer.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED:
-			print("Connected successfully!")
-			_connected_to_server()
-			return
 		timeout -= 1
 	
 	if is_connecting:
@@ -291,8 +288,8 @@ func _connected_to_server():
 	_show_lobby()
 
 func _connection_failed():
+	print("Failed to connect to the server")
 	if is_connecting:
-		print("Failed to connect to the server")
 		is_connecting = false
 		_show_error_dialog("Failed to connect to the server. Please check the IP and try again.")
 		multiplayer.multiplayer_peer = null
