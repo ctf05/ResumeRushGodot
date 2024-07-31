@@ -2,7 +2,7 @@ extends Node2D
 
 const MIN_PLAYERS = 4
 const MAX_PLAYERS = 8
-const DEFAULT_PORT = 4242
+const DEFAULT_PORT = 2242
 const DEFAULT_ROUND_DURATION = 300  # 5 minutes in seconds
 const DEFAULT_CEO_STARTING_BUDGET = 1000000
 const IP_CHECK_URL = "https://api.ipify.org"
@@ -19,10 +19,12 @@ enum GameState { LOBBY, PLAYING, ENDED }
 var players = {}
 var resumes = []
 var available_avatars = []
-var peer = ENetMultiplayerPeer.new()
+var peer = WebRTCMultiplayerPeer.new()
+var webrtc_peer = WebRTCPeerConnection.new()
 var main_menu: Control
 var game_instance: Node2D
 var results_instance: Node2D
+var room_id = ""
 var round_duration = DEFAULT_ROUND_DURATION
 var ceo_starting_budget = DEFAULT_CEO_STARTING_BUDGET
 var total_rounds = 3
@@ -49,6 +51,9 @@ var connection_check_timer: Timer
 
 var custom_theme: Theme
 
+
+const FIREBASE_URL = "https://us-central1-resumerushgodot.cloudfunctions.net/webRTCSignaling"
+
 func _ready():
 	_setup_viewport_scaling()
 	multiplayer.peer_connected.connect(self._player_connected)
@@ -56,15 +61,153 @@ func _ready():
 	multiplayer.connected_to_server.connect(self._connected_to_server)
 	
 	add_child(http_request)
-	http_request.connect("request_completed", self._on_ip_request_completed)
 	
 	_load_theme()
 	_initialize_main_menu()
 	_load_resumes()
 	_load_audio()
-	
-	get_public_ip()
 	_initialize_avatars()
+	
+	webrtc_peer.initialize({
+		"iceServers": [{ "urls": ["stun:stun.l.google.com:19302"] }]
+	})
+	webrtc_peer.connect("session_description_created", self._on_session_description_created)
+	webrtc_peer.connect("ice_candidate_created", self._on_ice_candidate_created)
+	
+func _initialize_webrtc_client():
+	peer.create_client(webrtc_peer)
+	multiplayer.multiplayer_peer = peer
+	webrtc_peer.create_offer()
+
+func _client_reconnect_to_host():
+	print("Client attempting to reconnect to host")
+	_initialize_webrtc_client()
+	_join_room()  # This will trigger the signaling process again
+
+func _join_room():
+	var body = JSON.stringify({
+		"action": "join_room",
+		"roomId": room_id,
+		"playerId": multiplayer.get_unique_id()
+	})
+	_send_request(body)
+	
+func _initialize_webrtc_host():
+	peer.create_mesh(MAX_PLAYERS)
+	multiplayer.multiplayer_peer = peer
+
+func _on_session_description_created(type, sdp):
+	webrtc_peer.set_local_description(type, sdp)
+	if is_host:
+		_send_offer(sdp)
+	else:
+		_send_answer(sdp)
+
+func _on_ice_candidate_created(media, index, name):
+	_send_ice_candidate(media, index, name)
+
+func _send_offer(sdp):
+	var body = JSON.stringify({
+		"action": "offer",
+		"roomId": room_id,
+		"playerId": multiplayer.get_unique_id(),
+		"data": {
+			"type": "offer",
+			"sdp": sdp
+		}
+	})
+	_send_request(body)
+
+func _send_answer(sdp):
+	var body = JSON.stringify({
+		"action": "answer",
+		"roomId": room_id,
+		"playerId": multiplayer.get_unique_id(),
+		"data": {
+			"type": "answer",
+			"sdp": sdp
+		}
+	})
+	_send_request(body)
+
+func _send_ice_candidate(media, index, name):
+	var body = JSON.stringify({
+		"action": "ice_candidate",
+		"roomId": room_id,
+		"playerId": multiplayer.get_unique_id(),
+		"data": {
+			"media": media,
+			"index": index,
+			"name": name
+		}
+	})
+	_send_request(body)
+
+func _on_request_completed(result, response_code, headers, body):
+	var response = JSON.parse_string(body.get_string_from_utf8())
+	if response.success:
+		match response.action:
+			"create_room", "join_room":
+				if is_host:
+					_initialize_webrtc_host()
+				else:
+					_initialize_webrtc_client()
+				_show_lobby()
+			"offer":
+				if not is_host:
+					webrtc_peer.set_remote_description("offer", response.data.sdp)
+					webrtc_peer.create_answer()
+			"answer":
+				if is_host:
+					webrtc_peer.set_remote_description("answer", response.data.sdp)
+			"ice_candidate":
+				webrtc_peer.add_ice_candidate(response.data.media, response.data.index, response.data.name)
+	else:
+		print("Error: ", response.message)
+	
+func create_server():
+	is_host = true
+	room_id = _generate_room_id()
+	global_lobby_code = room_id
+	print(global_lobby_code)
+	_update_lobby_ip()
+	_create_room()
+
+func join_lobby(code):
+	is_host = false
+	room_id = code
+	_join_room()
+
+func _create_room():
+	var body = JSON.stringify({
+		"action": "create_room",
+		"roomId": room_id,
+		"playerId": multiplayer.get_unique_id()
+	})
+	_send_request(body)
+
+func _send_request(body):
+	var headers = ["Content-Type: application/json"]
+	http_request.request(FIREBASE_URL, headers, HTTPClient.METHOD_POST, body)
+
+func _player_connected(id):
+	print("Player connected: ", id)
+	players[id] = {"role": null, "score": 0, "budget": ceo_starting_budget, "name": "Player " + str(id)}
+	connected_peers[id] = ""
+	_update_player_list(players)
+	if is_host:
+		show_notification("Player " + str(id) + " joined the lobby")
+	last_heartbeat_time[id] = Time.get_ticks_msec()
+
+func _player_disconnected(id):
+	print("Player disconnected: ", id)
+	players.erase(id)
+	connected_peers.erase(id)
+	_update_player_list(players)
+	last_heartbeat_time.erase(id)
+
+func _generate_room_id():
+	return str(randi() % 1000000).pad_zeros(6)
 	
 func _initialize_connection_check_system():
 	print("init check system")
@@ -141,35 +284,9 @@ func update_host_ip(new_ip):
 		host_ip = new_ip
 		join_lobby(compress_ip(new_ip))
 
-func _on_ip_request_completed(result, response_code, headers, body):
-	if result == HTTPRequest.RESULT_SUCCESS:
-		var new_ip = body.get_string_from_utf8()
-		global_lobby_code = compress_ip(external_ip)
-		if new_ip != external_ip:
-			external_ip = new_ip
-			if is_host:
-				host_ip = external_ip
-				global_lobby_code = compress_ip(external_ip)
-				_notify_peers_of_ip_change()
-			else:
-				rpc_id(1, "update_client_ip", multiplayer.get_unique_id(), external_ip)
-		print("Public IP: ", external_ip)
-		_update_lobby_ip()
-	else:
-		print("Failed to get public IP")
-
 func _notify_peers_of_ip_change():
 	for peer_id in connected_peers:
 		rpc_id(peer_id, "update_host_ip", external_ip)
-
-func _player_connected(id):
-	print("Player connected: ", id)
-	players[id] = {"role": null, "score": 0, "budget": ceo_starting_budget, "name": "Player " + str(id)}
-	connected_peers[id] = ""  # Will be updated when we receive the client's IP
-	_update_player_list(players)
-	if is_host:
-		show_notification("Player " + str(id) + " joined the lobby")
-	last_heartbeat_time[id] = Time.get_ticks_msec()
 	
 
 func _initialize_avatars():
@@ -229,61 +346,6 @@ func remove_player(id):
 	else:
 		print("Player not found: ", id)
 
-func create_server():
-	is_host = true
-	var upnp = UPNP.new()
-	var discover_result = upnp.discover()
-	if discover_result == UPNP.UPNP_RESULT_SUCCESS:
-		if upnp.get_gateway() and upnp.get_gateway().is_valid_gateway():
-			var map_result = upnp.add_port_mapping(DEFAULT_PORT, DEFAULT_PORT, ProjectSettings.get_setting("application/config/name"), "UDP")
-			if map_result == UPNP.UPNP_RESULT_SUCCESS:
-				print("Port forwarded successfully using UPnP")
-			else:
-				print("UPnP port mapping failed")
-		else:
-			print(upnp.get_gateway())
-			print("UPnP gateway failed")
-	else:
-		print("UPnP discovery failed")
-		
-	get_public_ip()
-	
-	var error = peer.create_server(DEFAULT_PORT, MAX_PLAYERS)
-	if error != OK:
-		print("Failed to create server. Error code: ", error)
-		return
-	multiplayer.multiplayer_peer = peer
-	print("Server created successfully on port ", DEFAULT_PORT)
-	
-	var host_id = multiplayer.get_unique_id()
-	add_player(host_id)
-	
-	_show_lobby()
-
-func join_lobby(code):
-	is_host = false
-	is_connecting = true
-	
-	host_ip = decompress_ip(code)
-	print("Attempting to connect to ", host_ip, ":", DEFAULT_PORT)
-	var error = peer.create_client(host_ip, DEFAULT_PORT)
-	if error != OK:
-		print("Failed to create client. Error code: ", error)
-		_connection_failed()
-		return
-	multiplayer.multiplayer_peer = peer
-	print("Client peer created, waiting for connection...")
-	
-	# Set a timeout for the connection attempt
-	var timeout = 10  # 10 seconds timeout
-	while is_connecting and timeout > 0:
-		await get_tree().create_timer(1.0).timeout
-		print("Waiting for connection... ", timeout, " seconds left")
-		timeout -= 1
-	
-	if is_connecting:
-		_connection_failed()
-
 func _connected_to_server():
 	print("Successfully connected to server")
 	is_connecting = false
@@ -298,18 +360,6 @@ func _connection_failed():
 		_show_error_dialog("Failed to connect to the server. Please check the IP and try again.")
 		multiplayer.multiplayer_peer = null
 
-@rpc("any_peer")
-func request_host_ip():
-	var requester_id = multiplayer.get_remote_sender_id()
-	rpc_id(requester_id, "receive_host_ip", external_ip)
-
-@rpc("any_peer")
-func receive_host_ip(ip):
-	if not is_host:
-		host_ip = ip
-		global_lobby_code = compress_ip(ip)
-		_update_lobby_ip()
-
 func _show_lobby():
 	_initialize_connection_check_system()
 	_initialize_heartbeat_system()
@@ -318,7 +368,6 @@ func _show_lobby():
 	lobby.connect("add_ai_player", Callable(self, "_add_ai_player"))
 	lobby.connect("remove_ai_player", Callable(self, "_remove_ai_player"))
 	add_child(lobby)
-	_update_lobby_ip()
 	lobby.update_player_list(players)
 	
 func _get_local_ip():
@@ -334,27 +383,15 @@ func _get_local_ip():
 func _update_lobby_ip():
 	_get_local_ip()
 	if has_node("Lobby"):
+		print("node")
 		get_node("Lobby").update_lobby_codes(global_lobby_code, local_lobby_code)
+	else:
+		print("no lobby")
 
 func show_notification(message):
 	if has_node("Lobby"):
 		get_node("Lobby").show_notification(message)
 
-@rpc("any_peer")
-func _update_host_ip(new_ip):
-	if not is_host:
-		print("Updating host IP to: ", new_ip)
-		host_ip = new_ip
-		# Only update the lobby code if we're not the host
-		global_lobby_code = compress_ip(new_ip)
-		_update_lobby_ip()
-
-func _player_disconnected(id):
-	print("Player disconnected: ", id)
-	players.erase(id)
-	connected_peers.erase(id)
-	_update_player_list(players)
-	last_heartbeat_time.erase(id)
 
 @rpc("any_peer", "call_local")
 func _start_game_rpc():
@@ -880,13 +917,6 @@ func _host_reconnect_to_peer(peer_id):
 	else:
 		print("No IP address found for peer ", peer_id)
 		_handle_reconnection_failed(peer_id)
-
-func _client_reconnect_to_host():
-	print("Client attempting to reconnect to host at IP ", host_ip)
-	var error = peer.create_client(host_ip, DEFAULT_PORT)
-	if error != OK:
-		print("Failed to create client for reconnection. Error code: ", error)
-		_handle_reconnection_failed(1)  # 1 is the assumed host ID
 
 func _on_reconnection_timeout(peer_id):
 	if peer_id in connected_peers:
