@@ -240,6 +240,9 @@ func create_server():
 				print("Port forwarded successfully using UPnP")
 			else:
 				print("UPnP port mapping failed")
+		else:
+			print(upnp.get_gateway())
+			print("UPnP gateway failed")
 	else:
 		print("UPnP discovery failed")
 		
