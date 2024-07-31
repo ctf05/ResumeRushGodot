@@ -93,7 +93,6 @@ func _receive_heartbeat(sender_id):
 	last_heartbeat_time[sender_id] = Time.get_ticks_msec()
 
 func get_public_ip():
-	
 	http_request.request(IP_CHECK_URL)
 	
 func _check_connection_to_peer(peer_id):
@@ -259,9 +258,10 @@ func create_server():
 func join_lobby(code):
 	is_host = false
 	is_connecting = true
-	var ip = decompress_ip(code)
-	print("Attempting to connect to ", ip, ":", DEFAULT_PORT)
-	var error = peer.create_client(ip, DEFAULT_PORT)
+	
+	host_ip = decompress_ip(code)
+	print("Attempting to connect to ", host_ip, ":", DEFAULT_PORT)
+	var error = peer.create_client(host_ip, DEFAULT_PORT)
 	if error != OK:
 		print("Failed to create client. Error code: ", error)
 		_connection_failed()
@@ -270,10 +270,14 @@ func join_lobby(code):
 	print("Client peer created, waiting for connection...")
 	
 	# Set a timeout for the connection attempt
-	var timeout = 10  # 10 seconds timeout
+	var timeout = 20  # 20 seconds timeout
 	while is_connecting and timeout > 0:
 		await get_tree().create_timer(1.0).timeout
 		print("Waiting for connection... ", timeout, " seconds left")
+		if multiplayer.multiplayer_peer.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED:
+			print("Connected successfully!")
+			_connected_to_server()
+			return
 		timeout -= 1
 	
 	if is_connecting:
@@ -937,8 +941,24 @@ func _request_game_state():
 	_synchronize_game_state(requester_id)
 	
 func _return_to_main_menu():
-	# Logic to return to the main menu
-	get_tree().change_scene_to_file("res://main.tscn")
+	# Reset necessary variables
+	is_host = false
+	is_connecting = false
+	host_ip = ""
+	multiplayer.multiplayer_peer = null
+	
+	# Remove any game-specific nodes
+	if has_node("Lobby"):
+		get_node("Lobby").queue_free()
+	if game_instance:
+		game_instance.queue_free()
+	
+	# Show the main menu
+	if main_menu:
+		main_menu.show()
+	else:
+		# If main_menu doesn't exist, you might need to recreate it or change scene
+		get_tree().change_scene_to_file("res://main.tscn")
 	
 func _update_game_display():
 	print("updating ui not implemented, unsure if necessary")

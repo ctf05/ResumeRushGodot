@@ -520,6 +520,14 @@ func make_offer(ceo_id, candidate_id, amount):
 func _on_accept_offer_pressed():
 	if current_player_role != Role.CANDIDATE:
 		return
+		
+	var current_player_id = multiplayer.get_unique_id()
+	
+	for i in range(accepted_offers.size()):
+		if accepted_offers[i].has(current_player_id):
+			accepted_offers.remove(i)
+			return
+			
 	var offer_list = get_node("OfferList")
 	var selected_items = offer_list.get_selected_items()
 	
@@ -527,15 +535,10 @@ func _on_accept_offer_pressed():
 		_show_notification("Please select an offer first.")
 		return
 	
-	var current_player_id = multiplayer.get_unique_id()
+
 	
 	var offer = offers[current_player_id]
 	
-	# Find the index of any existing offer for this player and remove it
-	for i in range(accepted_offers.size()):
-		if accepted_offers[i].has(current_player_id):
-			accepted_offers.remove(i)
-			break
 	
 	# Add the new accepted offer
 	accepted_offers.append({current_player_id: offer})
