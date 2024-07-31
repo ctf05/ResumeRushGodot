@@ -54,7 +54,6 @@ func _ready():
 	multiplayer.peer_connected.connect(self._player_connected)
 	multiplayer.peer_disconnected.connect(self._player_disconnected)
 	multiplayer.connected_to_server.connect(self._connected_to_server)
-	multiplayer.connection_failed.connect(self._connection_failed)
 	
 	add_child(http_request)
 	http_request.connect("request_completed", self._on_ip_request_completed)
@@ -68,6 +67,7 @@ func _ready():
 	_initialize_avatars()
 	
 func _initialize_connection_check_system():
+	print("init check system")
 	connection_check_timer = Timer.new()
 	connection_check_timer.wait_time = CONNECTION_CHECK_INTERVAL
 	connection_check_timer.connect("timeout", Callable(self, "_check_connections"))
@@ -75,6 +75,7 @@ func _initialize_connection_check_system():
 	connection_check_timer.start()
 	
 func _initialize_heartbeat_system():
+	print("init heartbeat")
 	heartbeat_timer = Timer.new()
 	heartbeat_timer.wait_time = HEARTBEAT_INTERVAL
 	heartbeat_timer.connect("timeout", Callable(self, "_on_heartbeat_timer_timeout"))
@@ -285,7 +286,7 @@ func _connected_to_server():
 	is_connecting = false
 	get_public_ip()  # Get our own public IP
 	rpc_id(1, "request_host_ip")  # Request the host's IP
-	_show_lobby()
+	#_show_lobby()
 
 func _connection_failed():
 	print("Failed to connect to the server")
@@ -598,7 +599,6 @@ func _show_join_dialog():
 	dialog.connect("custom_action", func(action):
 		if action == "join":
 			join_lobby(ip_input.text)
-			_show_lobby()
 		dialog.queue_free()
 	)
 	
