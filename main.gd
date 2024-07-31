@@ -93,6 +93,7 @@ func _receive_heartbeat(sender_id):
 	last_heartbeat_time[sender_id] = Time.get_ticks_msec()
 
 func get_public_ip():
+	
 	http_request.request(IP_CHECK_URL)
 	
 func _check_connection_to_peer(peer_id):
@@ -142,6 +143,7 @@ func update_host_ip(new_ip):
 func _on_ip_request_completed(result, response_code, headers, body):
 	if result == HTTPRequest.RESULT_SUCCESS:
 		var new_ip = body.get_string_from_utf8()
+		global_lobby_code = compress_ip(external_ip)
 		if new_ip != external_ip:
 			external_ip = new_ip
 			if is_host:
@@ -239,6 +241,8 @@ func create_server():
 				print("UPnP port mapping failed")
 	else:
 		print("UPnP discovery failed")
+		
+	get_public_ip()
 	
 	var error = peer.create_server(DEFAULT_PORT, MAX_PLAYERS)
 	if error != OK:
@@ -311,8 +315,19 @@ func _show_lobby():
 	add_child(lobby)
 	_update_lobby_ip()
 	lobby.update_player_list(players)
+	
+func _get_local_ip():
+	for address in IP.get_local_addresses():
+		if "." in address and not address.begins_with("127.") and not address.begins_with("169.254."):
+			if address.begins_with("192.168.") or address.begins_with("10.") or (address.begins_with("172.") and int(address.split(".")[1]) >= 16 and int(address.split(".")[1]) <= 31):
+				local_ip = address
+				local_lobby_code = compress_ip(local_ip)
+				break
+	if local_ip == '':
+		print("No local IP found")
 
 func _update_lobby_ip():
+	_get_local_ip()
 	if has_node("Lobby"):
 		get_node("Lobby").update_lobby_codes(global_lobby_code, local_lobby_code)
 
