@@ -7,6 +7,8 @@ const AIPlayer = preload("res://ai_player.gd")
 signal game_ended
 
 var players = {}
+var candidates = []
+var player_id = 0
 var current_round = 0
 var round_timer = 0
 var game_state = GameState.PLAYING
@@ -34,7 +36,7 @@ var ai_players = {}
 var emojis = ["👍", "👎", "😊", "😢", "💼", "💰"]
 
 func _ready():
-	current_player_role = players[multiplayer.get_unique_id()]["role"]
+	current_player_role = players[player_id]["role"]
 	_create_common_elements()
 	if current_player_role == Role.CEO:
 		_create_ceo_ui()
@@ -45,8 +47,9 @@ func _ready():
 	_create_emoji_panel()
 	_start_round()
 
-func initialize(p_players, p_round_duration, p_ceo_starting_budget, p_total_rounds, p_resumes, p_ai_players):
+func initialize(p_players, player_idd, p_round_duration, p_ceo_starting_budget, p_total_rounds, p_resumes, p_ai_players):
 	players = p_players
+	player_id = player_idd
 	round_duration = p_round_duration
 	ceo_starting_budget = p_ceo_starting_budget
 	total_rounds = p_total_rounds
@@ -102,11 +105,10 @@ func _create_common_elements():
 	resume_text.bbcode_enabled = true
 	resume_text.fit_content = true
 	resume_text.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	resume_text.set_offset(SIDE_LEFT, 40)
-	resume_text.set_offset(SIDE_TOP, 100)
+	resume_text.set_offset(SIDE_LEFT, 120)
+	resume_text.set_offset(SIDE_TOP, 310)
 	resume_text.set_offset(SIDE_RIGHT, 600)
 	resume_text.set_offset(SIDE_BOTTOM, 800)
-	resume_text.add_theme_color_override("font_color", Color.BLACK)
 	resume_display.add_child(resume_text)
 	
 func _update_chat_display():
@@ -117,7 +119,7 @@ func _update_chat_display():
 		for message in chat_histories["Everyone"]:
 			chat_display.append_text(message + "\n")
 	else:
-		var current_player_id = str(multiplayer.get_unique_id())
+		var current_player_id = str(player_id)
 		var partner_id = str(_get_player_id_by_name(current_chat_partner))
 		for message in chat_histories[current_player_id][partner_id]:
 			chat_display.append_text(message + "\n")
@@ -141,7 +143,12 @@ func _str_to_int_id(id):
 	return int(id) if id != "Everyone" else id
 
 # Update the _show_notification function to handle global and personal notifications:
+@rpc("any_peer", "reliable", "call_local")
+func _show_global_notification(message):
+	_show_notification(message, true)
+	
 func _show_notification(message, is_global = false):
+	print(message)
 	var notification = Label.new()
 	notification.text = message
 	
@@ -248,6 +255,8 @@ func _create_ceo_ui():
 	make_offer_button.set_offset(SIDE_BOTTOM, 1070)
 	make_offer_button.connect("pressed", Callable(self, "_on_make_offer_pressed"))
 	add_child(make_offer_button)
+	
+	_update_offer_display()
 
 func _create_candidate_ui():
 	var offer_list = ItemList.new()
@@ -296,9 +305,12 @@ func _create_chat_window():
 	player_dropdown.set_offset(SIDE_RIGHT, 630)
 	player_dropdown.set_offset(SIDE_BOTTOM, 50)
 	player_dropdown.add_item("Everyone")
-	for player_id in players:
-		if players[multiplayer.get_unique_id()]["name"] != players[player_id]["name"]:
-			player_dropdown.add_item(players[player_id]["name"])
+	print(players)
+	print("tetrrge")
+	for player_idd in players:
+		print(players[player_idd])
+		if players[player_idd]["name"] != players[player_id]["name"]:
+			player_dropdown.add_item(players[player_idd]["name"])
 	player_dropdown.connect("item_selected", Callable(self, "_on_player_selected"))
 	chat_window.add_child(player_dropdown)
 
@@ -441,7 +453,7 @@ func _calculate_scores():
 
 func _update_score_display():
 	var score_label = get_node("ScoreLabel")
-	score_label.text = "Score: " + str(players[multiplayer.get_unique_id()]["score"])
+	score_label.text = "Score: " + str(players[player_id]["score"])
 
 func _end_game():
 	emit_signal("game_ended")
@@ -460,7 +472,7 @@ func _show_game_over_screen():
 	vbox.add_child(game_over_label)
 	
 	var final_score_label = Label.new()
-	final_score_label.text = "Your Final Score: " + str(players[multiplayer.get_unique_id()]["score"])
+	final_score_label.text = "Your Final Score: " + str(players[player_id]["score"])
 	vbox.add_child(final_score_label)
 	
 	var return_to_menu_button = Button.new()
@@ -496,17 +508,17 @@ func _on_make_offer_pressed():
 	
 	var candidate_id = players.keys()[selected_items[0]]
 	
-	if amount <= 0 or amount > players[multiplayer.get_unique_id()]["budget"]:
+	if amount <= 0 or amount > players[player_id]["budget"]:
 		_show_notification("Invalid offer amount.")
 		return
 	
-	players[multiplayer.get_unique_id()]["budget"] -= amount
-	offers[candidate_id] = {"ceo_id": multiplayer.get_unique_id(), "amount": amount}
+	players[player_id]["budget"] -= amount
+	offers[candidate_id] = {"ceo_id": player_id, "amount": amount}
 	
 	_update_budget_display()
 	_update_offers(offers)
 	
-	_show_notification("Offer of $" + str(amount) + " made to " + players[candidate_id]["name"], true)
+	rpc("_show_global_notification", "Offer of $" + str(amount) + " made to " + players[candidate_id]["name"])
 	SoundManager.play_sound("offer_made")
 	
 func make_offer(ceo_id, candidate_id, amount):
@@ -521,11 +533,10 @@ func _on_accept_offer_pressed():
 	if current_player_role != Role.CANDIDATE:
 		return
 		
-	var current_player_id = multiplayer.get_unique_id()
+	var current_player_id = player_id
 	
 	for i in range(accepted_offers.size()):
 		if accepted_offers[i].has(current_player_id):
-			accepted_offers.remove(i)
 			return
 			
 	var offer_list = get_node("OfferList")
@@ -535,17 +546,11 @@ func _on_accept_offer_pressed():
 		_show_notification("Please select an offer first.")
 		return
 	
-
-	
 	var offer = offers[current_player_id]
 	
+	rpc("_update_accepted_offers", {current_player_id: offer})
 	
-	# Add the new accepted offer
-	accepted_offers.append({current_player_id: offer})
-	
-	_update_accepted_offers(accepted_offers)
-	
-	_show_notification("Offer of $" + str(offer["amount"]) + " accepted from " + players[offer["ceo_id"]]["name"], true)
+	rpc("_show_global_notification", "Offer of $" + str(offer["amount"]) + " accepted from " + players[offer["ceo_id"]]["name"])
 	SoundManager.play_sound("offer_accepted")
 
 func _on_decline_offer_pressed():
@@ -559,41 +564,42 @@ func _on_decline_offer_pressed():
 		_show_notification("Please select an offer first.")
 		return
 	
-	var offer = offers[multiplayer.get_unique_id()]
-	offers.erase(multiplayer.get_unique_id())
+	var offer = offers[player_id]
+	offers.erase(player_id)
 	
 	_update_offers(offers)
 	
-	_show_notification("Offer of $" + str(offer["amount"]) + " declined from " + players[offer["ceo_id"]]["name"], true)
+	rpc("_show_global_notification", "Offer of $" + str(offer["amount"]) + " declined from " + players[offer["ceo_id"]]["name"])
 	SoundManager.play_sound("offer_declined")
 
 func _update_budget_display():
 	var budget_label = get_node("BudgetLabel")
-	budget_label.text = "Budget: $" + str(players[multiplayer.get_unique_id()]["budget"])
+	budget_label.text = "Budget: $" + str(players[player_id]["budget"])
 
 func _update_offer_display():
 	if current_player_role == Role.CANDIDATE:
 		var offer_list = get_node("OfferList")
 		offer_list.clear()
 		
-		if multiplayer.get_unique_id() in offers:
-			var offer = offers[multiplayer.get_unique_id()]
+		if player_id in offers:
+			var offer = offers[player_id]
 			offer_list.add_item("Offer from " + players[offer["ceo_id"]]["name"] + ": $" + str(offer["amount"]))
 	elif current_player_role == Role.CEO:
 		var candidate_list = get_node("CandidateList")
 		candidate_list.clear()
 		for player_id in players:
 			if players[player_id]["role"] == Role.CANDIDATE:
+				candidates.append(player_id)
 				candidate_list.add_item(players[player_id]["name"])
 
-@rpc("any_peer", "reliable")
+@rpc("any_peer", "reliable", "call_local")
 func _update_offers(new_offers):
 	offers = new_offers
 	_update_offer_display()
 
-@rpc("any_peer", "reliable")
-func _update_accepted_offers(new_accepted_offers):
-	accepted_offers = new_accepted_offers
+@rpc("any_peer", "reliable", "call_local")
+func _update_accepted_offers(offer):
+	accepted_offers.append(offer)
 	_update_offer_display()
 
 func _on_chat_send_pressed():
@@ -601,7 +607,7 @@ func _on_chat_send_pressed():
 	var message = chat_input.text.strip_edges()
 	
 	if message != "":
-		var sender_id = str(multiplayer.get_unique_id())
+		var sender_id = str(player_id)
 		var sender_name = players[int(sender_id)]["name"]
 		
 		if current_chat_partner == "Everyone":
@@ -614,7 +620,7 @@ func _on_chat_send_pressed():
 		
 		chat_input.text = ""
 		
-@rpc("any_peer", "reliable")
+@rpc("any_peer", "reliable", "call_local")
 func _receive_chat_message(sender_name, message, recipient):
 	if recipient == "Everyone":
 		_add_chat_message(sender_name, message, "Everyone")
@@ -644,18 +650,21 @@ func _add_chat_message(sender_name, message, recipient):
 	_update_chat_display()
 
 func _on_candidate_selected(index):
-	var candidate_id = players.keys()[index]
+	var candidate_id = candidates[index]
+	print(candidate_id)
 	if players[candidate_id]["role"] == Role.CANDIDATE:
 		_show_resume(players[candidate_id]["resume"])
 
 func _show_resume(resume):
+	print("resume")
 	var resume_text = get_node("ResumeDisplay/ResumeText")
-	resume_text.bbcode_text = """
+	resume_text.bbcode_text = """[color=black]
 	[b]Name:[/b] %s
 	[b]Age:[/b] %d
 	[b]Education:[/b] %s
 	[b]Skills:[/b] %s
 	[b]Experience:[/b] %s
+	[/color]
 	""" % [resume["name"], resume["age"], resume["education"], resume["skills"], resume["experience"]]
 
 func _handle_ai_actions(delta):
@@ -663,9 +672,9 @@ func _handle_ai_actions(delta):
 		ai_players[ai_id].make_decision(delta)
 
 func _on_emoji_pressed(emoji):
-	rpc("_broadcast_emoji", players[multiplayer.get_unique_id()]["name"], emoji)
+	rpc("_broadcast_emoji", players[player_id]["name"], emoji)
 
-@rpc("any_peer", "reliable")
+@rpc("any_peer", "reliable", "call_local")
 func _broadcast_emoji(player_name, emoji):
 	_show_notification(player_name + ": " + emoji, true)
 	SoundManager.play_sound("emoji_reaction")

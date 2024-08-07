@@ -54,7 +54,7 @@ func _send_chat_message():
 	var sender_name = game_scene.players[player_id]["name"]
 	
 	# Call the game scene's method to send the chat message
-	print("AI " + sender_name + " sending message to " + str(recipient_id) + ": " + message)
+	print(sender_name + " sending message to " + str(recipient_id) + ": " + message)
 	game_scene.receive_ai_chat_message(sender_name, message, recipient_id)
 
 func _generate_chat_message() -> String:
@@ -86,6 +86,10 @@ func _make_offer():
 
 	if offer_amount > 0 and offer_amount <= budget:
 		game_scene.make_offer(player_id, candidate_id, offer_amount)
+		var sender_name = game_scene.players[player_id]["name"]
+		var candidate_name = game_scene.players[candidate_id]["name"]
+		print(sender_name + " made an offer of " + str(offer_amount) + " to " + candidate_name)
+		game_scene.rpc("_show_global_notification", sender_name + " made an offer of " + str(offer_amount) + " to " + candidate_name)
 
 func _respond_to_offer():
 	var offers = game_scene.get_offers_for_candidate(player_id)
@@ -97,12 +101,17 @@ func _respond_to_offer():
 	var resume_value = resume["value"]
 
 	var acceptance_threshold = resume_value * (1.0 - personality["risk_tolerance"])
+	var ceo_name = game_scene.players[offer["ceo_id"]]["name"]
 	if offer_value >= acceptance_threshold:
 		game_scene.rpc("_update_accepted_offers", {player_id: offer})
+		print(game_scene.players[player_id]["name"] + " accepted an offer of " + str(offer_value) + " from " + ceo_name)
+		game_scene.rpc("_show_global_notification", game_scene.players[player_id]["name"] + " accepted an offer of " + str(offer_value) + " from " + ceo_name)
 	else:
 		# Decline the offer
 		game_scene.offers.erase(player_id)
 		game_scene.rpc("_update_offers", game_scene.offers)
+		print(game_scene.players[player_id]["name"] + " declined an offer of " + str(offer_value) + " from " + ceo_name)
+		game_scene.rpc("_show_global_notification", game_scene.players[player_id]["name"] + " declined an offer of " + str(offer_value) + " from " + ceo_name)
 
 func get_ai_name():
 	return "AI Player " + str(player_id)

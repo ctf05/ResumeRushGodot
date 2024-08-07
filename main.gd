@@ -491,10 +491,11 @@ func show_notification(message):
 	if has_node("Lobby"):
 		get_node("Lobby").show_notification(message)
 
-@rpc("any_peer", "call_local")
+@rpc("any_peer", "reliable", "call_local")
 func _start_game_rpc():
-	print("_start_game_rpc called")
-	_start_game()
+	if not is_host:
+		print("_start_game_rpc called")
+		_start_game()
 
 func _load_theme():
 	custom_theme = load("res://themes/theme.tres")
@@ -798,7 +799,7 @@ func _show_options_menu():
 	if main_menu:
 		main_menu.hide()
 
-@rpc("any_peer", "reliable")
+@rpc("any_peer", "reliable", "call_local")
 func _update_player_list(new_players):
 	lobby.update_player_list(new_players)
 
@@ -810,6 +811,7 @@ func _start_game():
 	
 	_assign_roles()
 	_initialize_game()
+	_stop_notification_polling()
 	if is_host:
 		rpc("_start_game_rpc")
 	
@@ -831,7 +833,7 @@ func _initialize_game():
 		get_node("Lobby").queue_free()
 	
 	game_instance = preload("res://game.tscn").instantiate()
-	game_instance.initialize(players, round_duration, ceo_starting_budget, total_rounds, resumes, ai_players)
+	game_instance.initialize(players, player_id, round_duration, ceo_starting_budget, total_rounds, resumes, ai_players)
 	game_instance.connect("game_ended", Callable(self, "_on_game_ended"))
 	add_child(game_instance)
 	
@@ -932,7 +934,7 @@ func get_game_settings():
 
 func _on_lobby_start_game():
 	print("Received start game signal from lobby")
-	rpc("_start_game_rpc")
+	_start_game()
 	
 func _on_game_start_results():
 	print("Received start results signal from game")
