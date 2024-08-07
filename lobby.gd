@@ -262,8 +262,8 @@ func _load_avatars():
 	for i in range(1, 9):  # Assuming 8 avatar images
 		avatars.append(load("res://assets/avatars/avatar_%02d.png" % i))
 
-func update_lobby_codes(global_code, local_code):
-	code_label.text = "Global Code: " + global_code + "                 Local Code: " + local_code
+func update_lobby_codes(code):
+	code_label.text = "Lobby Code: " + code
 
 func _on_send_pressed():
 	var chat_input = chat_container.get_node("LineEdit")
