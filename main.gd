@@ -30,6 +30,7 @@ var polling_timer: Timer
 var connected_peers = {}
 var lobby = preload("res://lobby.tscn").instantiate()
 var http_request = HTTPRequest.new()
+var player_id = 0
 
 @onready var background_music: AudioStreamPlayer = $BackgroundMusic
 @onready var sfx_player: AudioStreamPlayer = $SFXPlayer
@@ -81,10 +82,11 @@ func _on_connection_state_changed(state):
 func create_server():
 	is_host = true
 	room_id = _generate_room_id()
+	player_id = 1 # Host always uses player ID 1
 	var body = {
 		"action": "create_room",
 		"roomId": room_id,
-		"playerId": multiplayer.get_unique_id()
+		"playerId": player_id
 	}
 	_send_request(body)
 	_update_lobby_code()
@@ -92,13 +94,14 @@ func create_server():
 func join_lobby(code):
 	is_host = false
 	room_id = code
+	player_id = randi() % 10000000 + 1  # Generate a random player ID between 1 and 10,000,000
 	_join_room()
 
 func _create_room():
 	var body = JSON.stringify({
 		"action": "create_room",
 		"roomId": room_id,
-		"playerId": multiplayer.get_unique_id()
+		"playerId": player_id
 	})
 	_send_request(body)
 	_update_lobby_code()
@@ -232,7 +235,7 @@ func _initialize_webrtc_host():
 	multiplayer.multiplayer_peer = peer
 
 func _initialize_webrtc_client():
-	peer.create_client(webrtc_peer)
+	peer.create_client(room_id)
 	multiplayer.multiplayer_peer = peer
 	webrtc_peer.create_offer()
 
@@ -303,7 +306,7 @@ func _poll_notifications():
 		return
 	
 	print("Polling for notifications")
-	var query_params = "?action=poll_notifications&roomId=" + room_id + "&playerId=" + str(multiplayer.get_unique_id())
+	var query_params = "?action=poll_notifications&roomId=" + room_id + "&playerId=" + str(player_id)
 	var full_url = FIREBASE_URL + query_params
 	
 	print("Sending request to URL: ", full_url)

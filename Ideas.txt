@@ -2,3 +2,4 @@ This is my final offer audio
 Limit amout of offers a CEO can make
 Right now reconnection only works on global codes
 quickplay matchmaking server
+Kick player from lobby after a few minutes to avoid api costs
