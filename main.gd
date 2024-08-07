@@ -90,6 +90,7 @@ func create_server():
 	}
 	_send_request(body)
 	_update_lobby_code()
+	add_player(player_id)
 
 func join_lobby(code):
 	is_host = false
@@ -386,9 +387,8 @@ func _handle_ice_candidate(notification):
 
 func _player_connected(id):
 	print("Player connected: ", id)
-	players[id] = {"role": null, "score": 0, "budget": ceo_starting_budget, "name": "Player " + str(id)}
+	add_player(id)
 	connected_peers[id] = ""
-	_update_player_list(players)
 	if is_host:
 		show_notification("Player " + str(id) + " joined the lobby")
 
@@ -396,6 +396,8 @@ func _player_disconnected(id):
 	print("Player disconnected: ", id)
 	players.erase(id)
 	connected_peers.erase(id)
+	if is_host:
+		rpc("_update_players", players)
 	_update_player_list(players)
 	_send_leave_room(id)
 
@@ -450,6 +452,8 @@ func add_player(id, is_ai = false):
 			"avatar": avatar_index
 		}
 		print("Player added: ", players[id])
+		if is_host:
+			rpc("_update_players", players)
 		_update_player_list(players)
 	else:
 		print("Player already exists: ", players[id])
@@ -806,6 +810,8 @@ func _start_game():
 	
 	_assign_roles()
 	_initialize_game()
+	if is_host:
+		rpc("_start_game_rpc")
 	
 func _start_results():
 	_initialize_results()
@@ -933,14 +939,21 @@ func _on_game_start_results():
 	rpc("_start_results_rpc")
 
 func _add_ai_player():
-	var ai_id = players.size() + 1  # Assign a unique ID to the AI player
-	add_player(ai_id, true)
-	ai_players.append(ai_id)
+	if is_host:
+		var ai_id = players.size() + 1
+		while ai_id in players:
+			ai_id += 1
+		add_player(ai_id, true)
+		ai_players.append(ai_id)
+		rpc("_update_players", players)
+
 
 func _remove_ai_player():
-	if ai_players:
-		var ai_id = ai_players.pop_back()
-		remove_player(ai_id)
+	if is_host:
+		if ai_players:
+			var ai_id = ai_players.pop_back()
+			remove_player(ai_id)
+			rpc("_update_players", players)
 		
 func _update_lobby_code():
 	if has_node("Lobby"):
