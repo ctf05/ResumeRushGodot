@@ -537,6 +537,7 @@ func _on_accept_offer_pressed():
 	
 	for i in range(accepted_offers.size()):
 		if accepted_offers[i].has(current_player_id):
+			_show_notification("You have already accepted an offer")
 			return
 			
 	var offer_list = get_node("OfferList")

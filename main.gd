@@ -397,7 +397,7 @@ func _player_disconnected(id):
 	players.erase(id)
 	connected_peers.erase(id)
 	if is_host:
-		rpc("_update_players", players)
+		rpc("_update_player_list", players)
 	_update_player_list(players)
 	_send_leave_room(id)
 
@@ -453,7 +453,7 @@ func add_player(id, is_ai = false):
 		}
 		print("Player added: ", players[id])
 		if is_host:
-			rpc("_update_players", players)
+			rpc("_update_player_list", players)
 		_update_player_list(players)
 	else:
 		print("Player already exists: ", players[id])
@@ -485,17 +485,22 @@ func _show_lobby():
 	add_child(lobby)
 	lobby.update_player_list(players)
 	_update_lobby_code()
-	_start_notification_polling()
 
 func show_notification(message):
 	if has_node("Lobby"):
 		get_node("Lobby").show_notification(message)
 
-@rpc("any_peer", "reliable", "call_local")
-func _start_game_rpc():
-	if not is_host:
-		print("_start_game_rpc called")
-		_start_game()
+@rpc("any_peer", "reliable")
+func _start_game_client(playersD, round_durationD, ceo_starting_budgetD, total_roundsD, resumesD, ai_playersD):
+	print("_start_game_client called")
+	players = playersD
+	round_duration = round_durationD
+	ceo_starting_budget = ceo_starting_budgetD
+	total_rounds = total_roundsD
+	resumes = resumesD
+	ai_players = ai_playersD
+	_initialize_game()
+	
 
 func _load_theme():
 	custom_theme = load("res://themes/theme.tres")
@@ -713,6 +718,7 @@ func _on_host_pressed():
 	play_sound("button_click")
 	create_server()
 	_show_lobby()
+	_start_notification_polling()
 
 func _on_join_pressed():
 	play_sound("button_click")
@@ -803,7 +809,7 @@ func _show_options_menu():
 func _update_player_list(new_players):
 	lobby.update_player_list(new_players)
 
-func _start_game():
+func _start_game_host():
 	print("Starting game...")
 	if players.size() < MIN_PLAYERS:
 		print("Cannot start game. Players:", players.size())
@@ -812,8 +818,8 @@ func _start_game():
 	_assign_roles()
 	_initialize_game()
 	_stop_notification_polling()
-	if is_host:
-		rpc("_start_game_rpc")
+	
+	rpc("_start_game_client", players, player_id, round_duration, ceo_starting_budget, total_rounds, resumes, ai_players)
 	
 func _start_results():
 	_initialize_results()
@@ -934,7 +940,7 @@ func get_game_settings():
 
 func _on_lobby_start_game():
 	print("Received start game signal from lobby")
-	_start_game()
+	_start_game_host()
 	
 func _on_game_start_results():
 	print("Received start results signal from game")
@@ -947,7 +953,7 @@ func _add_ai_player():
 			ai_id += 1
 		add_player(ai_id, true)
 		ai_players.append(ai_id)
-		rpc("_update_players", players)
+		rpc("_update_player_list", players)
 
 
 func _remove_ai_player():
@@ -955,7 +961,7 @@ func _remove_ai_player():
 		if ai_players:
 			var ai_id = ai_players.pop_back()
 			remove_player(ai_id)
-			rpc("_update_players", players)
+			rpc("_update_player_list", players)
 		
 func _update_lobby_code():
 	if has_node("Lobby"):
