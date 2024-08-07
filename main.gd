@@ -235,7 +235,7 @@ func _initialize_webrtc_host():
 	multiplayer.multiplayer_peer = peer
 
 func _initialize_webrtc_client():
-	peer.create_client(room_id)
+	peer.create_client(int(room_id))
 	multiplayer.multiplayer_peer = peer
 	webrtc_peer.create_offer()
 
