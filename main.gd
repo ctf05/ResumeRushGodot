@@ -110,7 +110,7 @@ func _join_room():
 	var body = JSON.stringify({
 		"action": "join_room",
 		"roomId": room_id,
-		"playerId": multiplayer.get_unique_id()
+		"playerId": player_id
 	})
 	_send_request(body)
 	_update_lobby_code()
