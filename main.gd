@@ -247,7 +247,18 @@ func _initialize_webrtc_client():
 	peer.create_client(int(room_id))
 	multiplayer.multiplayer_peer = peer
 	print("Creating offer")
-	webrtc_peer.create_offer()
+	var offer = await webrtc_peer.create_offer()
+	print("Offer created: ", offer)
+	if offer:
+		print("Setting local description")
+		var result = await webrtc_peer.set_local_description("offer", offer)
+		if result == OK:
+			print("Local description set, sending offer")
+			_send_offer(offer)
+		else:
+			print("Failed to set local description: ", result)
+	else:
+		print("Failed to create offer")
 
 func _on_session_description_created(type, sdp):
 	print("Session description created: ", type)
@@ -268,13 +279,17 @@ func _send_offer(sdp):
 	var body = JSON.stringify({
 		"action": "offer",
 		"roomId": room_id,
-		"playerId": multiplayer.get_unique_id(),
+		"playerId": player_id,
 		"data": {
 			"type": "offer",
 			"sdp": sdp
 		}
 	})
-	_send_request(body)
+	var error = _send_request(body)
+	if error == OK:
+		print("Offer sent successfully")
+	else:
+		print("Error sending offer: ", error)
 
 func _send_answer(sdp):
 	print("Sending answer")
