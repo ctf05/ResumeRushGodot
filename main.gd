@@ -14,6 +14,7 @@ var resumes = []
 var available_avatars = []
 var peer = WebRTCMultiplayerPeer.new()
 var webrtc_peer = WebRTCPeerConnection.new()
+var data_channel: WebRTCDataChannel
 var main_menu: Control
 var game_instance: Node2D
 var results_instance: Node2D
