@@ -244,24 +244,23 @@ func _initialize_webrtc_host():
 
 func _initialize_webrtc_client():
 	print("Initializing WebRTC client")
-	var result = peer.create_client(int(room_id))
-	if result != OK:
-		print("Failed to create client peer: ", result)
-		return
+	peer.create_client(int(room_id))
 	multiplayer.multiplayer_peer = peer
-	print("Creating offer")
-	var offer = await webrtc_peer.create_offer()
-	print("Offer created: ", offer)
-	if offer:
-		print("Setting local description")
-		result = await webrtc_peer.set_local_description("offer", offer)
-		if result == OK:
-			print("Local description set, sending offer")
-			_send_offer(offer)
-		else:
-			print("Failed to set local description: ", result)
+	
+	# Create a data channel first
+	data_channel = webrtc_peer.create_data_channel("data")
+	if data_channel:
+		print("Data channel created")
 	else:
-		print("Failed to create offer")
+		print("Failed to create data channel")
+		return
+	
+	print("Creating offer")
+	var error = webrtc_peer.create_offer()
+	if error == OK:
+		print("Offer creation started successfully")
+	else:
+		print("Failed to start offer creation: ", error)
 
 func _on_session_description_created(type, sdp):
 	print("Session description created: ", type)
