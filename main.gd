@@ -14,7 +14,6 @@ var resumes = []
 var available_avatars = []
 var peer = WebRTCMultiplayerPeer.new()
 var webrtc_peer = WebRTCPeerConnection.new()
-var data_channel: WebRTCDataChannel
 var main_menu: Control
 var game_instance: Node2D
 var results_instance: Node2D
@@ -247,14 +246,6 @@ func _initialize_webrtc_client():
 	print("Initializing WebRTC client")
 	peer.create_client(int(room_id))
 	multiplayer.multiplayer_peer = peer
-	
-	# Create a data channel first
-	data_channel = webrtc_peer.create_data_channel("data")
-	if data_channel:
-		print("Data channel created")
-	else:
-		print("Failed to create data channel")
-		return
 	
 	print("Creating offer")
 	var error = webrtc_peer.create_offer()
