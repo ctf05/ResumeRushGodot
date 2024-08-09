@@ -63,6 +63,7 @@ func _ready():
 	print("Game initialized")
 
 func _on_connection_state_changed(state):
+	print("WebRTC connection state changed: ", state)
 	match state:
 		WebRTCPeerConnection.STATE_NEW:
 			print("WebRTC: New connection")
@@ -220,37 +221,50 @@ func _handle_error(error_message):
 		_return_to_main_menu()
 		
 func _handle_webrtc_signaling(response):
+	print("Handling WebRTC signaling: ", response.get("action"))
 	match response.get("action"):
 		"offer":
 			if not is_host:
+				print("Received offer, setting remote description")
 				webrtc_peer.set_remote_description("offer", response.data.sdp)
+				print("Creating answer")
 				webrtc_peer.create_answer()
 		"answer":
 			if is_host:
+				print("Received answer, setting remote description")
 				webrtc_peer.set_remote_description("answer", response.data.sdp)
 		"ice_candidate":
+			print("Received ICE candidate")
 			webrtc_peer.add_ice_candidate(response.data.media, response.data.index, response.data.name)
 
 func _initialize_webrtc_host():
+	print("Initializing WebRTC host")
 	peer.create_mesh(MAX_PLAYERS)
 	multiplayer.multiplayer_peer = peer
 
 func _initialize_webrtc_client():
+	print("Initializing WebRTC client")
 	peer.create_client(int(room_id))
 	multiplayer.multiplayer_peer = peer
+	print("Creating offer")
 	webrtc_peer.create_offer()
 
 func _on_session_description_created(type, sdp):
+	print("Session description created: ", type)
 	webrtc_peer.set_local_description(type, sdp)
 	if is_host:
+		print("Sending offer")
 		_send_offer(sdp)
 	else:
+		print("Sending answer")
 		_send_answer(sdp)
 
 func _on_ice_candidate_created(media, index, name):
+	print("ICE candidate created")
 	_send_ice_candidate(media, index, name)
 
 func _send_offer(sdp):
+	print("Sending offer")
 	var body = JSON.stringify({
 		"action": "offer",
 		"roomId": room_id,
@@ -263,6 +277,7 @@ func _send_offer(sdp):
 	_send_request(body)
 
 func _send_answer(sdp):
+	print("Sending answer")
 	var body = JSON.stringify({
 		"action": "answer",
 		"roomId": room_id,
@@ -276,6 +291,7 @@ func _send_answer(sdp):
 	_send_request(body)
 
 func _send_ice_candidate(media, index, name):
+	print("Sending ICE candidate")
 	var body = JSON.stringify({
 		"action": "ice_candidate",
 		"roomId": room_id,
@@ -390,6 +406,7 @@ func _player_connected(id):
 	add_player(id)
 	connected_peers[id] = ""
 	if is_host:
+		print("Updating player list for new connection")
 		show_notification("Player " + str(id) + " joined the lobby")
 
 func _player_disconnected(id):
@@ -397,6 +414,7 @@ func _player_disconnected(id):
 	players.erase(id)
 	connected_peers.erase(id)
 	if is_host:
+		print("Updating player list after disconnection")
 		rpc("_update_player_list", players)
 	_update_player_list(players)
 	_send_leave_room(id)
@@ -807,6 +825,7 @@ func _show_options_menu():
 
 @rpc("any_peer", "reliable", "call_local")
 func _update_player_list(new_players):
+	print("Updating player list: ", new_players)
 	lobby.update_player_list(new_players)
 
 func _start_game_host():
@@ -819,6 +838,7 @@ func _start_game_host():
 	_initialize_game()
 	_stop_notification_polling()
 	
+	print("Sending start game RPC to clients")
 	rpc("_start_game_client", players, player_id, round_duration, ceo_starting_budget, total_rounds, resumes, ai_players)
 	
 func _start_results():
