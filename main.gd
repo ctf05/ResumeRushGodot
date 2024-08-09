@@ -244,14 +244,17 @@ func _initialize_webrtc_host():
 
 func _initialize_webrtc_client():
 	print("Initializing WebRTC client")
-	peer.create_client(int(room_id))
+	var result = peer.create_client(int(room_id))
+	if result != OK:
+		print("Failed to create client peer: ", result)
+		return
 	multiplayer.multiplayer_peer = peer
 	print("Creating offer")
 	var offer = await webrtc_peer.create_offer()
 	print("Offer created: ", offer)
 	if offer:
 		print("Setting local description")
-		var result = await webrtc_peer.set_local_description("offer", offer)
+		result = await webrtc_peer.set_local_description("offer", offer)
 		if result == OK:
 			print("Local description set, sending offer")
 			_send_offer(offer)
